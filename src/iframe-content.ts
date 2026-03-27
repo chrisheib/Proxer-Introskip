@@ -4,8 +4,6 @@ const FRAME_HASH_BUTTON_CLASS = 'proxer-save-framehash-btn';
 const DEFAULT_SKIP_TIME = 90;
 const DEFAULT_SKIP_DURATION = 85;
 const DEFAULT_MATCH_THRESHOLD = 8;
-const DEFAULT_SCAN_WINDOW_START = 0;
-const DEFAULT_SCAN_WINDOW_END = 60 * 12;
 const DEFAULT_SCAN_INTERVAL_MS = 1000 / 30; // 30 FPS
 const DEFAULT_FRAME_GAP_MS = 800;
 
@@ -261,13 +259,52 @@ async function iSaveSeriesFrameHashes(seriesId, markers) {
         frameHashEntries,
         frameGapMs: existing.frameGapMs || DEFAULT_FRAME_GAP_MS,
         threshold: existing.threshold || DEFAULT_MATCH_THRESHOLD,
-        scanWindowStart: existing.scanWindowStart || DEFAULT_SCAN_WINDOW_START,
-        scanWindowEnd: existing.scanWindowEnd || DEFAULT_SCAN_WINDOW_END,
         skipDuration: existing.skipDuration || DEFAULT_SKIP_DURATION
     };
 
     await chrome.storage.local.set({ seriesProfiles });
     return seriesProfiles[seriesId];
+}
+
+/** Shows a short-lived toast at the old top-right Set Skip Time button position. */
+function iShowSaveToast(video, message) {
+    const container = video.parentElement || document.body;
+    container.style.position = 'relative';
+
+    const existingToast = container.querySelector('#proxer-save-toast');
+    if (existingToast) {
+        existingToast.remove();
+    }
+
+    const toast = document.createElement('div');
+    toast.id = 'proxer-save-toast';
+    toast.textContent = message;
+    toast.style.cssText = `
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.78);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    padding: 5px 10px;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 150ms ease;
+  `;
+
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+    });
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => {
+            toast.remove();
+        }, 180);
+    }, 1800);
 }
 
 /** Adds the manual skip-time setup button for episodes without existing timing data. */
@@ -349,7 +386,7 @@ function iInjectFrameHashButton(video, seriesId) {
                     { hash: secondHash, thumbnail: secondThumbnail }
                 ]);
                 console.log('[Proxer Skip] [IFRAME] Saved frame hash list for series', seriesId, profile);
-                alert(`Saved frame hashes for series ${seriesId}. Total markers: ${profile.frameHashes.length}`);
+                iShowSaveToast(video, `Saved skipframe (${profile.frameHashes.length} total)`);
             } catch (error) {
                 console.error('[Proxer Skip] [IFRAME] Failed to save frame hashes:', error);
                 alert('Failed to capture frame hashes. Canvas may be blocked by cross-origin media.');
@@ -390,16 +427,12 @@ function iStartFrameHashMatching(video, seriesId, fallbackSkipDuration) {
         }
 
         const threshold = profile.threshold || DEFAULT_MATCH_THRESHOLD;
-        const scanWindowStart = profile.scanWindowStart || DEFAULT_SCAN_WINDOW_START;
-        const scanWindowEnd = profile.scanWindowEnd || DEFAULT_SCAN_WINDOW_END;
         const skipDuration = profile.skipDuration || fallbackSkipDuration || DEFAULT_SKIP_DURATION;
 
         let hasJumped = false;
         console.log('[Proxer Skip] [IFRAME] Starting frame hash matching with profile:', {
             seriesId,
             threshold,
-            scanWindowStart,
-            scanWindowEnd,
             skipDuration,
             hashCount: hashes.length
         });
@@ -409,14 +442,6 @@ function iStartFrameHashMatching(video, seriesId, fallbackSkipDuration) {
             }
 
             const now = video.currentTime;
-            if (now < scanWindowStart) {
-                return;
-            }
-
-            if (now > scanWindowEnd) {
-                clearInterval(intervalId);
-                return;
-            }
 
             let currentHash;
             try {
@@ -485,8 +510,8 @@ function iStartFrameHashMatching(video, seriesId, fallbackSkipDuration) {
     // };
 
     if (!episodeData) {
-        console.log('[Proxer Skip] [IFRAME] No data for episode, adding button');
-        iAddSkipButton(video, episodeKey);
+        console.log('[Proxer Skip] [IFRAME] No data for episode; Set Skip Time button is hidden');
+        // iAddSkipButton(video, episodeKey);
     } else {
         console.log('[Proxer Skip] [IFRAME] Data exists, skipping button');
     }
