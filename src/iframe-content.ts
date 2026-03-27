@@ -159,6 +159,25 @@ function iCaptureCurrentFrameHash(video) {
     return iComputeDHashFromImageData(imageData, 9, 8);
 }
 
+/** Captures a small frame thumbnail used for popup hover previews. */
+function iCaptureCurrentFrameThumbnail(video) {
+    if (!video || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) {
+        throw new Error('Video frame is not ready for thumbnail capture');
+    }
+
+    const thumbCanvas = document.createElement('canvas');
+    thumbCanvas.width = 96;
+    thumbCanvas.height = 54;
+
+    const thumbCtx = thumbCanvas.getContext('2d', { willReadFrequently: true });
+    if (!thumbCtx) {
+        throw new Error('Unable to initialize thumbnail canvas context');
+    }
+
+    thumbCtx.drawImage(video, 0, 0, thumbCanvas.width, thumbCanvas.height);
+    return thumbCanvas.toDataURL('image/jpeg', 0.7);
+}
+
 /** Computes hash similarity as Hamming distance for threshold-based jump decisions. */
 function iHammingDistance(a, b) {
     if (!a || !b || a.length !== b.length) {
@@ -188,23 +207,58 @@ async function iSaveSkipTime(episodeKey, timeSeconds) {
 }
 
 /** Persists and deduplicates series-level frame hash markers used for future episode detection. */
-async function iSaveSeriesFrameHashes(seriesId, hashes) {
+async function iSaveSeriesFrameHashes(seriesId, markers) {
     const data = await chrome.storage.local.get(['seriesProfiles']);
     const seriesProfiles = data.seriesProfiles || {};
     const existing = seriesProfiles[seriesId] || {};
     const existingHashes = Array.isArray(existing.frameHashes) ? existing.frameHashes : [];
-    const dedupSet = new Set(existingHashes);
+    const existingEntries = Array.isArray(existing.frameHashEntries) ? existing.frameHashEntries : [];
+    const dedupMap = {};
 
-    for (let i = 0; i < hashes.length; i += 1) {
-        const hash = hashes[i];
-        if (hash) {
-            dedupSet.add(hash);
+    for (let i = 0; i < existingEntries.length; i += 1) {
+        const entry = existingEntries[i];
+        if (entry && entry.hash) {
+            dedupMap[entry.hash] = {
+                hash: entry.hash,
+                thumbnail: typeof entry.thumbnail === 'string' ? entry.thumbnail : ''
+            };
         }
+    }
+
+    for (let i = 0; i < existingHashes.length; i += 1) {
+        const hash = existingHashes[i];
+        if (hash && !dedupMap[hash]) {
+            dedupMap[hash] = { hash, thumbnail: '' };
+        }
+    }
+
+    for (let i = 0; i < markers.length; i += 1) {
+        const marker = markers[i];
+        if (!marker || !marker.hash) {
+            continue;
+        }
+
+        const current = dedupMap[marker.hash];
+        dedupMap[marker.hash] = {
+            hash: marker.hash,
+            thumbnail: marker.thumbnail || (current ? current.thumbnail : '') || ''
+        };
+    }
+
+    const frameHashEntries = [];
+    const dedupKeys = Object.keys(dedupMap);
+    for (let i = 0; i < dedupKeys.length; i += 1) {
+        frameHashEntries.push(dedupMap[dedupKeys[i]]);
+    }
+    const frameHashes = [];
+    for (let i = 0; i < frameHashEntries.length; i += 1) {
+        frameHashes.push(frameHashEntries[i].hash);
     }
 
     seriesProfiles[seriesId] = {
         ...existing,
-        frameHashes: Array.from(dedupSet),
+        frameHashes,
+        frameHashEntries,
         frameGapMs: existing.frameGapMs || DEFAULT_FRAME_GAP_MS,
         threshold: existing.threshold || DEFAULT_MATCH_THRESHOLD,
         scanWindowStart: existing.scanWindowStart || DEFAULT_SCAN_WINDOW_START,
@@ -275,8 +329,8 @@ function iInjectFrameHashButton(video, seriesId) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = `plyr__control ${FRAME_HASH_BUTTON_CLASS}`;
-        button.textContent = 'Save Framehash';
-        button.title = 'Save frame hashes for auto-skip detection';
+        button.textContent = 'Save Skipframe';
+        button.title = 'Save skipframe hashes for auto-skip detection';
         button.style.marginLeft = '8px';
 
         button.addEventListener('click', async () => {
@@ -286,9 +340,14 @@ function iInjectFrameHashButton(video, seriesId) {
 
             try {
                 const firstHash = iCaptureCurrentFrameHash(video);
+                const firstThumbnail = iCaptureCurrentFrameThumbnail(video);
                 await iSleep(DEFAULT_FRAME_GAP_MS);
                 const secondHash = iCaptureCurrentFrameHash(video);
-                const profile = await iSaveSeriesFrameHashes(seriesId, [firstHash, secondHash]);
+                const secondThumbnail = iCaptureCurrentFrameThumbnail(video);
+                const profile = await iSaveSeriesFrameHashes(seriesId, [
+                    { hash: firstHash, thumbnail: firstThumbnail },
+                    { hash: secondHash, thumbnail: secondThumbnail }
+                ]);
                 console.log('[Proxer Skip] [IFRAME] Saved frame hash list for series', seriesId, profile);
                 alert(`Saved frame hashes for series ${seriesId}. Total markers: ${profile.frameHashes.length}`);
             } catch (error) {
