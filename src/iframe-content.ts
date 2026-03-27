@@ -1,11 +1,10 @@
 // Content script for stream.proxer.me iframe
 
 const FRAME_HASH_BUTTON_CLASS = 'proxer-save-framehash-btn';
-const DEFAULT_SKIP_TIME = 90;
 const DEFAULT_SKIP_DURATION = 85;
-const DEFAULT_MATCH_THRESHOLD = 8;
+const DEFAULT_MATCH_THRESHOLD = 10;
 const DEFAULT_SCAN_INTERVAL_MS = 1000 / 30; // 30 FPS
-const DEFAULT_FRAME_GAP_MS = 800;
+const GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
 
 /** Loads and initializes persisted episode and series data used by both skip strategies. */
 async function iLoadData() {
@@ -89,6 +88,11 @@ function iGetSeriesId(episodeKey) {
     }
 
     return episodeKey.split('-')[0];
+}
+
+/** Returns the storage key used for one series' skipframe data. */
+function iGetSeriesSkipframesStorageKey(seriesId) {
+    return `seriesSkipframes:${seriesId}`;
 }
 
 /** Provides a shared async delay helper for spacing multi-frame hash captures. */
@@ -206,11 +210,11 @@ async function iSaveSkipTime(episodeKey, timeSeconds) {
 
 /** Persists and deduplicates series-level frame hash markers used for future episode detection. */
 async function iSaveSeriesFrameHashes(seriesId, markers) {
-    const data = await chrome.storage.local.get(['seriesProfiles']);
-    const seriesProfiles = data.seriesProfiles || {};
-    const existing = seriesProfiles[seriesId] || {};
-    const existingHashes = Array.isArray(existing.frameHashes) ? existing.frameHashes : [];
-    const existingEntries = Array.isArray(existing.frameHashEntries) ? existing.frameHashEntries : [];
+    const skipframesStorageKey = iGetSeriesSkipframesStorageKey(seriesId);
+    const data = await chrome.storage.local.get([skipframesStorageKey]);
+    const seriesSkipframes = data[skipframesStorageKey] || {};
+    const existingHashes = Array.isArray(seriesSkipframes.frameHashes) ? seriesSkipframes.frameHashes : [];
+    const existingEntries = Array.isArray(seriesSkipframes.frameHashEntries) ? seriesSkipframes.frameHashEntries : [];
     const dedupMap = {};
 
     for (let i = 0; i < existingEntries.length; i += 1) {
@@ -253,17 +257,39 @@ async function iSaveSeriesFrameHashes(seriesId, markers) {
         frameHashes.push(frameHashEntries[i].hash);
     }
 
-    seriesProfiles[seriesId] = {
-        ...existing,
-        frameHashes,
-        frameHashEntries,
-        frameGapMs: existing.frameGapMs || DEFAULT_FRAME_GAP_MS,
-        threshold: existing.threshold || DEFAULT_MATCH_THRESHOLD,
-        skipDuration: existing.skipDuration || DEFAULT_SKIP_DURATION
-    };
+    await chrome.storage.local.set({
+        [skipframesStorageKey]: {
+            frameHashes,
+            frameHashEntries
+        }
+    });
 
-    await chrome.storage.local.set({ seriesProfiles });
-    return seriesProfiles[seriesId];
+    return {
+        frameHashes,
+        frameHashEntries
+    };
+}
+
+/** Loads global skipframe matching settings used across all series. */
+async function iGetGlobalSkipframeSettings() {
+    const data = await chrome.storage.local.get([GLOBAL_SKIPFRAME_SETTINGS_KEY]);
+    const raw = data[GLOBAL_SKIPFRAME_SETTINGS_KEY] || {};
+
+    const threshold = Number.isFinite(raw.threshold) && raw.threshold >= 0
+        ? raw.threshold
+        : DEFAULT_MATCH_THRESHOLD;
+    const skipDuration = Number.isFinite(raw.skipDuration) && raw.skipDuration >= 0
+        ? raw.skipDuration
+        : DEFAULT_SKIP_DURATION;
+    const refreshMs = Number.isFinite(raw.refreshMs) && raw.refreshMs >= 10
+        ? raw.refreshMs
+        : DEFAULT_SCAN_INTERVAL_MS;
+
+    return {
+        threshold,
+        skipDuration,
+        refreshMs
+    };
 }
 
 /** Shows a short-lived toast at the old top-right Set Skip Time button position. */
@@ -378,12 +404,8 @@ function iInjectFrameHashButton(video, seriesId) {
             try {
                 const firstHash = iCaptureCurrentFrameHash(video);
                 const firstThumbnail = iCaptureCurrentFrameThumbnail(video);
-                await iSleep(DEFAULT_FRAME_GAP_MS);
-                const secondHash = iCaptureCurrentFrameHash(video);
-                const secondThumbnail = iCaptureCurrentFrameThumbnail(video);
                 const profile = await iSaveSeriesFrameHashes(seriesId, [
-                    { hash: firstHash, thumbnail: firstThumbnail },
-                    { hash: secondHash, thumbnail: secondThumbnail }
+                    { hash: firstHash, thumbnail: firstThumbnail }
                 ]);
                 console.log('[Proxer Skip] [IFRAME] Saved frame hash list for series', seriesId, profile);
                 iShowSaveToast(video, `Saved skipframe (${profile.frameHashes.length} total)`);
@@ -415,25 +437,28 @@ function iInjectFrameHashButton(video, seriesId) {
 }
 
 /** Runs the bounded hash scan loop that auto-jumps when a saved marker is detected. */
-function iStartFrameHashMatching(video, seriesId, fallbackSkipDuration) {
-    chrome.storage.local.get(['seriesProfiles'], (data) => {
-        const seriesProfiles = data.seriesProfiles || {};
-        const profile = seriesProfiles[seriesId];
-        const hashes = profile && Array.isArray(profile.frameHashes) ? profile.frameHashes : [];
+function iStartFrameHashMatching(video, seriesId) {
+    const skipframesStorageKey = iGetSeriesSkipframesStorageKey(seriesId);
+    chrome.storage.local.get([skipframesStorageKey], async (data) => {
+        const seriesSkipframes = data[skipframesStorageKey] || {};
+        const hashes = Array.isArray(seriesSkipframes.frameHashes) ? seriesSkipframes.frameHashes : [];
 
         if (!hashes.length) {
             console.log('[Proxer Skip] [IFRAME] No frame hashes configured for series', seriesId);
             return;
         }
 
-        const threshold = profile.threshold || DEFAULT_MATCH_THRESHOLD;
-        const skipDuration = profile.skipDuration || fallbackSkipDuration || DEFAULT_SKIP_DURATION;
+        const settings = await iGetGlobalSkipframeSettings();
+        const threshold = settings.threshold;
+        const skipDuration = settings.skipDuration;
+        const refreshMs = settings.refreshMs;
 
         let hasJumped = false;
         console.log('[Proxer Skip] [IFRAME] Starting frame hash matching with profile:', {
             seriesId,
             threshold,
             skipDuration,
+            refreshMs,
             hashCount: hashes.length
         });
         const intervalId = setInterval(() => {
@@ -464,7 +489,7 @@ function iStartFrameHashMatching(video, seriesId, fallbackSkipDuration) {
                     return;
                 }
             }
-        }, DEFAULT_SCAN_INTERVAL_MS);
+        }, refreshMs);
     });
 }
 
@@ -487,27 +512,10 @@ function iStartFrameHashMatching(video, seriesId, fallbackSkipDuration) {
     const data = await iLoadData();
     const episodes = data.episodes;
     const episodeData = episodes[episodeKey];
-    const skipTime = episodeData ? episodeData.skipTime : DEFAULT_SKIP_TIME;
-    const skipDuration = episodeData ? episodeData.skipDuration : DEFAULT_SKIP_DURATION;
-    console.log('[Proxer Skip] [IFRAME] Skip time for', episodeKey, ':', skipTime);
+    console.log('[Proxer Skip] [IFRAME] Episode data available:', Boolean(episodeData));
 
     iInjectFrameHashButton(video, seriesId);
-    iStartFrameHashMatching(video, seriesId, skipDuration);
-
-    // let skipped = false;
-    // video.ontimeupdate = () => {
-    //     if (video.currentTime >= skipTime && video.currentTime < skipTime + 5 && !skipped) {
-    //         // console.log('[Proxer Skip] [IFRAME] Prompting to skip at', player.currentTime);
-    //         console.log('[Proxer Skip] [IFRAME] skip, setting time to', skipTime + skipDuration);
-    //         video.currentTime = skipTime + skipDuration;
-    //         skipped = true;
-    //         // if (confirm('Skip opening?')) {
-    //         //     console.log('[Proxer Skip] [IFRAME] User confirmed skip, setting time to', skipTime);
-    //         // } else {
-    //         //     console.log('[Proxer Skip] [IFRAME] User declined skip');
-    //         // }
-    //     }
-    // };
+    iStartFrameHashMatching(video, seriesId);
 
     if (!episodeData) {
         console.log('[Proxer Skip] [IFRAME] No data for episode; Set Skip Time button is hidden');

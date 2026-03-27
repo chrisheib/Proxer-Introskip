@@ -33,6 +33,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    await initGlobalSkipframeSettingsInputs();
+
     await renderActiveSeriesFrameHashes();
 });
 
@@ -41,10 +43,21 @@ type SeriesFrameHashEntry = {
     thumbnail?: string;
 };
 
-type SeriesProfile = {
+type SeriesSkipframesData = {
     frameHashes?: string[];
     frameHashEntries?: SeriesFrameHashEntry[];
 };
+
+type GlobalSkipframeSettings = {
+    threshold: number;
+    skipDuration: number;
+    refreshMs: number;
+};
+
+const POPUP_GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
+const POPUP_DEFAULT_MATCH_THRESHOLD = 10;
+const POPUP_DEFAULT_SKIP_DURATION = 85;
+const POPUP_DEFAULT_REFRESH_MS = 1000 / 30;
 
 async function updateSkip(key: string, time: string) {
     const data = await chrome.storage.local.get(['episodes']);
@@ -59,6 +72,67 @@ async function updateSkip(key: string, time: string) {
 function parseSeriesIdFromPath(pathname: string) {
     const match = pathname.match(/^\/watch\/([^/]+)/);
     return match ? match[1] : null;
+}
+
+function getSeriesSkipframesStorageKey(seriesId: string) {
+    return `seriesSkipframes:${seriesId}`;
+}
+
+async function getGlobalSkipframeSettings(): Promise<GlobalSkipframeSettings> {
+    const data = await chrome.storage.local.get([POPUP_GLOBAL_SKIPFRAME_SETTINGS_KEY]);
+    const raw = data[POPUP_GLOBAL_SKIPFRAME_SETTINGS_KEY] || {};
+
+    const threshold = Number.isFinite(raw.threshold) && raw.threshold >= 0
+        ? raw.threshold
+        : POPUP_DEFAULT_MATCH_THRESHOLD;
+    const skipDuration = Number.isFinite(raw.skipDuration) && raw.skipDuration >= 0
+        ? raw.skipDuration
+        : POPUP_DEFAULT_SKIP_DURATION;
+    const refreshMs = Number.isFinite(raw.refreshMs) && raw.refreshMs >= 10
+        ? raw.refreshMs
+        : POPUP_DEFAULT_REFRESH_MS;
+
+    return {
+        threshold,
+        skipDuration,
+        refreshMs
+    };
+}
+
+async function setGlobalSkipframeSettings(settings: GlobalSkipframeSettings) {
+    await chrome.storage.local.set({
+        [POPUP_GLOBAL_SKIPFRAME_SETTINGS_KEY]: settings
+    });
+}
+
+async function initGlobalSkipframeSettingsInputs() {
+    const thresholdInput = document.getElementById('global-threshold-input') as HTMLInputElement | null;
+    const durationInput = document.getElementById('global-duration-input') as HTMLInputElement | null;
+    const refreshInput = document.getElementById('global-refresh-input') as HTMLInputElement | null;
+    if (!thresholdInput || !durationInput || !refreshInput) {
+        return;
+    }
+
+    const settings = await getGlobalSkipframeSettings();
+    thresholdInput.value = String(settings.threshold);
+    durationInput.value = String(settings.skipDuration);
+    refreshInput.value = String(Math.round(settings.refreshMs));
+
+    const persistSettings = async () => {
+        const threshold = Math.max(0, Number.parseInt(thresholdInput.value, 10) || POPUP_DEFAULT_MATCH_THRESHOLD);
+        const skipDuration = Math.max(0, Number.parseInt(durationInput.value, 10) || POPUP_DEFAULT_SKIP_DURATION);
+        const refreshMs = Math.max(10, Number.parseInt(refreshInput.value, 10) || Math.round(POPUP_DEFAULT_REFRESH_MS));
+
+        thresholdInput.value = String(threshold);
+        durationInput.value = String(skipDuration);
+        refreshInput.value = String(refreshMs);
+
+        await setGlobalSkipframeSettings({ threshold, skipDuration, refreshMs });
+    };
+
+    thresholdInput.addEventListener('change', persistSettings);
+    durationInput.addEventListener('change', persistSettings);
+    refreshInput.addEventListener('change', persistSettings);
 }
 
 async function getActiveSeriesId() {
@@ -85,26 +159,25 @@ async function getActiveSeriesId() {
 }
 
 async function removeSeriesFrameHash(seriesId: string, hashToRemove: string) {
-    const data = await chrome.storage.local.get(['seriesProfiles']);
-    const seriesProfiles = (data.seriesProfiles || {}) as Record<string, SeriesProfile>;
-    const profile = seriesProfiles[seriesId] || {};
-    const hashes = Array.isArray(profile.frameHashes) ? profile.frameHashes : [];
-    const entries = getFrameHashEntries(profile);
+    const skipframesStorageKey = getSeriesSkipframesStorageKey(seriesId);
+    const data = await chrome.storage.local.get([skipframesStorageKey]);
+    const seriesSkipframes = (data[skipframesStorageKey] || {}) as SeriesSkipframesData;
+    const hashes = Array.isArray(seriesSkipframes.frameHashes) ? seriesSkipframes.frameHashes : [];
+    const entries = getFrameHashEntries(seriesSkipframes);
 
-    seriesProfiles[seriesId] = {
-        ...profile,
-        frameHashes: hashes.filter((hash) => hash !== hashToRemove),
-        frameHashEntries: entries.filter((entry) => entry.hash !== hashToRemove)
-    };
-
-    await chrome.storage.local.set({ seriesProfiles });
+    await chrome.storage.local.set({
+        [skipframesStorageKey]: {
+            frameHashes: hashes.filter((hash) => hash !== hashToRemove),
+            frameHashEntries: entries.filter((entry) => entry.hash !== hashToRemove)
+        }
+    });
 }
 
-function getFrameHashEntries(profile: SeriesProfile): SeriesFrameHashEntry[] {
+function getFrameHashEntries(seriesSkipframes: SeriesSkipframesData): SeriesFrameHashEntry[] {
     const result: SeriesFrameHashEntry[] = [];
     const seen = new Set<string>();
 
-    const rawEntries = Array.isArray(profile.frameHashEntries) ? profile.frameHashEntries : [];
+    const rawEntries = Array.isArray(seriesSkipframes.frameHashEntries) ? seriesSkipframes.frameHashEntries : [];
     for (let i = 0; i < rawEntries.length; i += 1) {
         const entry = rawEntries[i];
         if (!entry || typeof entry.hash !== 'string' || seen.has(entry.hash)) {
@@ -118,7 +191,7 @@ function getFrameHashEntries(profile: SeriesProfile): SeriesFrameHashEntry[] {
         });
     }
 
-    const legacyHashes = Array.isArray(profile.frameHashes) ? profile.frameHashes : [];
+    const legacyHashes = Array.isArray(seriesSkipframes.frameHashes) ? seriesSkipframes.frameHashes : [];
     for (let i = 0; i < legacyHashes.length; i += 1) {
         const hash = legacyHashes[i];
         if (!hash || seen.has(hash)) {
@@ -173,10 +246,10 @@ async function renderActiveSeriesFrameHashes() {
 
     context.textContent = `Series ${seriesId}`;
 
-    const data = await chrome.storage.local.get(['seriesProfiles']);
-    const seriesProfiles = (data.seriesProfiles || {}) as Record<string, SeriesProfile>;
-    const profile = seriesProfiles[seriesId] || {};
-    const entries = getFrameHashEntries(profile);
+    const skipframesStorageKey = getSeriesSkipframesStorageKey(seriesId);
+    const data = await chrome.storage.local.get([skipframesStorageKey]);
+    const seriesSkipframes = (data[skipframesStorageKey] || {}) as SeriesSkipframesData;
+    const entries = getFrameHashEntries(seriesSkipframes);
 
     if (!entries.length) {
         const empty = document.createElement('li');

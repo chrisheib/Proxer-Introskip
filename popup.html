@@ -68,6 +68,18 @@
         input {
             width: 50px;
         }
+
+        .global-setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 6px 0;
+            gap: 8px;
+        }
+
+        .global-setting-row input {
+            width: 70px;
+        }
     </style>
 </head>
 
@@ -80,6 +92,20 @@
     <ul id="framehash-list"></ul>
     <div id="framehash-preview">
         <img id="framehash-preview-image" alt="Frame hash preview">
+    </div>
+    <hr>
+    <h3>Global Skipframe Settings</h3>
+    <div class="global-setting-row">
+        <label for="global-threshold-input">Threshold</label>
+        <input id="global-threshold-input" type="number" min="0" step="1">
+    </div>
+    <div class="global-setting-row">
+        <label for="global-duration-input">Duration (sec)</label>
+        <input id="global-duration-input" type="number" min="0" step="1">
+    </div>
+    <div class="global-setting-row">
+        <label for="global-refresh-input">Refresh (ms)</label>
+        <input id="global-refresh-input" type="number" min="10" step="1">
     </div>
     <hr>
     <label>
