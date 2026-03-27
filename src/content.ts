@@ -108,6 +108,28 @@ function addSkipButton(player) {
         }
     }
 
+    // 2 seconds after load, auto-select the Proxer-Stream mirror if present and not active.
+    setTimeout(async () => {
+        const setting = await chrome.storage.local.get('autoSelectMirror');
+        if (setting.autoSelectMirror === false) {
+            console.log('[Proxer Skip] Auto-select mirror disabled, skipping');
+            return;
+        }
+        const mirror = document.querySelector<HTMLAnchorElement>('#mirror_proxer-stream');
+        if (mirror && !mirror.classList.contains('active')) {
+            console.log('[Proxer Skip] Proxer-Stream mirror not active, clicking it');
+            // Prevent the `javascript:void(0)` href from being followed (blocked by CSP).
+            // The capturing listener runs before bubble-phase handlers, so preventDefault()
+            // stops the navigation while the page's changeMirror handler still fires.
+            const suppressHref = (e: Event) => {
+                e.preventDefault();
+                mirror.removeEventListener('click', suppressHref, true);
+            };
+            mirror.addEventListener('click', suppressHref, true);
+            mirror.click();
+        }
+    }, 1000);
+
     // const episodes = await loadData();
     // const episodeData = episodes[episodeKey];
     // const skipTime = episodeData ? episodeData.skipTime : 90; // Default to 90s
