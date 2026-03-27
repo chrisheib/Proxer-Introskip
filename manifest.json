@@ -1,0 +1,47 @@
+{
+    "manifest_version": 3,
+    "name": "Proxer Anime Skip",
+    "version": "1.0",
+    "description": "Automatically skip anime openings on proxer.me",
+    "permissions": [
+        "activeTab",
+        "storage"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "https://proxer.me/watch/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_end"
+        },
+        {
+            "matches": [
+                "https://stream.proxer.me/embed-*",
+                "https://stream-service.proxer.me/embed-*"
+            ],
+            "js": [
+                "iframe-content.js"
+            ],
+            "run_at": "document_end",
+            "all_frames": true
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "Proxer Skip Settings"
+    },
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "data.json"
+            ],
+            "matches": [
+                "https://proxer.me/*",
+                "https://stream.proxer.me/*"
+            ]
+        }
+    ]
+}

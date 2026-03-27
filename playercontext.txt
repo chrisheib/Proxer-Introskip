@@ -1,0 +1,70 @@
+document.querySelector('#player').plyr:
+
+
+t {play: ƒ, pause: ƒ, togglePlay: ƒ, stop: ƒ, restart: ƒ, …}
+ads: t {load: ƒ, ready: ƒ, setupIMA: ƒ, requestAds: ƒ, pollCountdown: ƒ, …}
+airplay: ƒ ()
+captions: {active: false, currentTrack: -1, meta: WeakMap, toggled: false, language: 'en', …}
+config: {enabled: true, title: '', debug: false, autoplay: false, autopause: true, …}
+debug: e {enabled: false}
+decreaseVolume: ƒ (e)
+destroy: ƒ (e)
+failed: false
+forward: ƒ (e)
+fullscreen: t {onChange: ƒ, toggleFallback: ƒ, trapFocus: ƒ, update: ƒ, enter: ƒ, …}
+id: 3552
+increaseVolume: ƒ (e)
+lastSeekTime: 0
+listeners: t {firstTouch: ƒ, setTabFocus: ƒ, global: ƒ, container: ƒ, media: ƒ, …}
+loading: false
+media: video#player
+off: ƒ (e,t)
+on: ƒ (e,t)
+once: ƒ (e,t)
+options: {speed: Array(8), quality: Array(5)}
+pause: ƒ ()
+play: ƒ ()
+previewThumbnails: t {load: ƒ, getThumbnails: ƒ, getThumbnail: ƒ, startMove: ƒ, endMove: ƒ, …}
+provider: "html5"
+ready: true
+restart: ƒ ()
+rewind: ƒ (e)
+stop: ƒ ()
+storage: t {enabled: true, key: 'plyr', get: ƒ, set: ƒ}
+supported: {api: true, ui: true}
+supports: ƒ (e)
+timers: {loading: 1581, controls: 1576}
+toggleControls: ƒ (e)
+togglePlay: ƒ (e)
+touch: false
+type: "video"
+autoplay: (...)
+buffered: (...)
+currentTime: (...)
+currentTrack: (...)
+download: (...)
+duration: (...)
+ended: (...)
+hasAudio: (...)
+isAudio: (...)
+isEmbed: (...)
+isHTML5: (...)
+isVideo: (...)
+isVimeo: (...)
+isYouTube: (...)
+language: (...)
+loop: (...)
+maximumSpeed: (...)
+minimumSpeed: (...)
+muted: (...)
+paused: (...)
+pip: (...)
+playing: (...)
+poster: (...)
+quality: (...)
+ratio: (...)
+seeking: (...)
+source: (...)
+speed: (...)
+stopped: (...)
+volume: (...)
