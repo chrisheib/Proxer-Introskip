@@ -4,6 +4,7 @@ const FRAME_HASH_BUTTON_CLASS = 'proxer-save-framehash-btn';
 const DEFAULT_SKIP_DURATION = 85;
 const DEFAULT_MATCH_THRESHOLD = 10;
 const DEFAULT_SCAN_INTERVAL_MS = 1000 / 30; // 30 FPS
+const DEFAULT_MATCH_DEBOUNCE_MS = 3000;
 const GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
 
 /** Loads and initializes persisted episode and series data used by both skip strategies. */
@@ -453,16 +454,21 @@ function iStartFrameHashMatching(video, seriesId) {
         const skipDuration = settings.skipDuration;
         const refreshMs = settings.refreshMs;
 
-        let hasJumped = false;
+        let debounceUntilMs = 0;
         console.log('[Proxer Skip] [IFRAME] Starting frame hash matching with profile:', {
             seriesId,
             threshold,
             skipDuration,
             refreshMs,
-            hashCount: hashes.length
+            hashCount: hashes.length,
+            debounceMs: DEFAULT_MATCH_DEBOUNCE_MS
         });
         const intervalId = setInterval(() => {
-            if (hasJumped || video.ended || video.paused) {
+            if (video.ended || video.paused) {
+                return;
+            }
+
+            if (Date.now() < debounceUntilMs) {
                 return;
             }
 
@@ -484,8 +490,7 @@ function iStartFrameHashMatching(video, seriesId) {
                     const jumpTarget = now + skipDuration;
                     console.log('[Proxer Skip] [IFRAME] Frame hash matched; jumping to', jumpTarget, 'distance', distance);
                     video.currentTime = jumpTarget;
-                    hasJumped = true;
-                    clearInterval(intervalId);
+                    debounceUntilMs = Date.now() + DEFAULT_MATCH_DEBOUNCE_MS;
                     return;
                 }
             }
