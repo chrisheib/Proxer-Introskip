@@ -39,7 +39,7 @@ function waitForPlayer() {
     return new Promise((resolve) => {
         const check = () => {
             const playerElement = document.querySelector('#player');
-            const player = playerElement?.plyr;
+            const player = (playerElement as any)?.plyr;
             if (player && player.ready) {
                 console.log('[Proxer Skip] Plyr player found and ready');
                 resolve(player);
@@ -69,7 +69,7 @@ function addSkipButton(player) {
     button.onclick = () => {
         console.log('[Proxer Skip] Skip button clicked');
         const time = prompt('Enter skip time in seconds (e.g., 90 for opening):');
-        if (time && !isNaN(time)) {
+        if (time && !isNaN(Number(time))) {
             const episodeKey = getEpisodeKey();
             console.log('[Proxer Skip] Saving skip time for', episodeKey, ':', time);
             chrome.storage.local.get(['episodes'], (data) => {

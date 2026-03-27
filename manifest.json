@@ -13,7 +13,7 @@
                 "https://proxer.me/watch/*"
             ],
             "js": [
-                "content.js"
+                "dist/content.js"
             ],
             "run_at": "document_end"
         },
@@ -23,7 +23,7 @@
                 "https://stream-service.proxer.me/embed-*"
             ],
             "js": [
-                "iframe-content.js"
+                "dist/iframe-content.js"
             ],
             "run_at": "document_end",
             "all_frames": true
