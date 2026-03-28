@@ -17,8 +17,9 @@ fi
 
 required_files="
 manifest.json
+manifest.firefox.json
 popup.html
-data.json
+icon.png
 dist/content.js
 dist/iframe-content.js
 dist/popup.js
@@ -43,22 +44,48 @@ if [ -z "$version" ]; then
 fi
 
 name="proxer-anime-skip-v${version}.zip"
+firefox_name="proxer-anime-skip-firefox-v${version}.zip"
 release_dir="release"
 outfile="$release_dir/$name"
+firefox_outfile="$release_dir/$firefox_name"
+
+archive_files="
+manifest.json
+popup.html
+icon.png
+dist
+"
+
+pack_zip() {
+  output_file="$1"
+  shift
+  if [ "$archiver" = "zip" ]; then
+    zip -r "$output_file" "$@" -x "*.map"
+  else
+    # 7z writes zip-compatible archives with -tzip.
+    7z a -tzip "$output_file" "$@" -xr!*.map >/dev/null
+  fi
+}
 
 mkdir -p "$release_dir"
 rm -f "$outfile"
+rm -f "$firefox_outfile"
 
-if [ "$archiver" = "zip" ]; then
-  zip -r "$outfile" \
-    manifest.json \
-    popup.html \
-    data.json \
-    dist \
-    -x "*.map"
-else
-  # 7z writes zip-compatible archives with -tzip.
-  7z a -tzip "$outfile" manifest.json popup.html data.json dist -xr!*.map >/dev/null
-fi
+pack_zip "$outfile" $archive_files
+
+# Firefox package uses Firefox-specific metadata as manifest.json.
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+mkdir -p "$tmp_dir/dist"
+cp manifest.firefox.json "$tmp_dir/manifest.json"
+cp popup.html icon.png "$tmp_dir/"
+cp dist/content.js dist/iframe-content.js dist/popup.js "$tmp_dir/dist/"
+
+pack_zip "$firefox_outfile" \
+  "$tmp_dir/manifest.json" \
+  "$tmp_dir/popup.html" \
+  "$tmp_dir/icon.png" \
+  "$tmp_dir/dist"
 
 echo "Pack complete: $outfile"
+echo "Pack complete: $firefox_outfile"
