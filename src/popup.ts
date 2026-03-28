@@ -1,26 +1,4 @@
 document.addEventListener('DOMContentLoaded', async () => {
-    const list = document.getElementById('episodes-list');
-    if (!list) {
-        return;
-    }
-
-    const data = await chrome.storage.local.get('episodes');
-    const episodes = (data.episodes || {}) as Record<string, { skipTime?: number }>;
-
-    for (const [key, value] of Object.entries(episodes)) {
-        const li = document.createElement('li');
-        li.append(`${key}: `);
-
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.value = String(value.skipTime ?? 90);
-        input.addEventListener('change', async () => {
-            await updateSkip(key, input.value);
-        });
-
-        li.appendChild(input);
-        list.appendChild(li);
-    }
 
     // Auto-select mirror toggle
     const toggle = document.getElementById('auto-mirror-toggle') as HTMLInputElement | null;
@@ -58,16 +36,6 @@ const POPUP_GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
 const POPUP_DEFAULT_MATCH_THRESHOLD = 10;
 const POPUP_DEFAULT_SKIP_DURATION = 85;
 const POPUP_DEFAULT_REFRESH_MS = 1000 / 30;
-
-async function updateSkip(key: string, time: string) {
-    const data = await chrome.storage.local.get(['episodes']);
-    const episodes = (data.episodes || {}) as Record<string, { skipTime?: number }>;
-    episodes[key] = {
-        ...(episodes[key] || {}),
-        skipTime: Number.parseInt(time, 10)
-    };
-    await chrome.storage.local.set({ episodes });
-}
 
 function parseSeriesIdFromPath(pathname: string) {
     const match = pathname.match(/^\/watch\/([^/]+)/);

@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
-    "name": "Proxer Anime Skip",
+    "name": "Proxer Skip",
     "version": "1.0",
-    "description": "Automatically skip anime openings on proxer.me",
+    "description": "Überspringe automatisch Intros, Openings und Endings auf proxer.me",
     "permissions": [
         "activeTab",
         "storage"

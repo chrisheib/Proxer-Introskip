@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>Proxer Skip Settings</title>
+    <title>Proxer Skip Einstellungen</title>
     <style>
         body {
             width: 300px;
@@ -84,32 +84,32 @@
 </head>
 
 <body>
-    <h3>Episode Skip Times</h3>
+    <!-- <h3>Episode Skip Times</h3>
     <ul id="episodes-list"></ul>
-    <hr>
-    <h3>Series Frame Hashes</h3>
-    <p id="framehash-context">Open a watch page to manage frame hashes.</p>
+    <hr> -->
+    <h3>Serien Skipframes</h3>
+    <p id="framehash-context">Öffne eine Episode, um Frame-Hashes zu verwalten.</p>
     <ul id="framehash-list"></ul>
     <div id="framehash-preview">
         <img id="framehash-preview-image" alt="Frame hash preview">
     </div>
     <hr>
-    <h3>Global Skipframe Settings</h3>
+    <h3>Globale Skipframe-Einstellungen</h3>
     <div class="global-setting-row">
-        <label for="global-threshold-input">Threshold</label>
+        <label for="global-threshold-input">Schwellenwert</label>
         <input id="global-threshold-input" type="number" min="0" step="1">
     </div>
     <div class="global-setting-row">
-        <label for="global-duration-input">Duration (sec)</label>
+        <label for="global-duration-input">Dauer (Sekunden)</label>
         <input id="global-duration-input" type="number" min="0" step="1">
     </div>
     <div class="global-setting-row">
-        <label for="global-refresh-input">Refresh (ms)</label>
+        <label for="global-refresh-input">Aktualisierung (ms)</label>
         <input id="global-refresh-input" type="number" min="10" step="1">
     </div>
     <hr>
     <label>
-        <input type="checkbox" id="auto-mirror-toggle"> Auto-select Proxer-Stream mirror
+        <input type="checkbox" id="auto-mirror-toggle"> Automatisch auf roten Proxer-Player wechseln
     </label>
     <script src="dist/popup.js"></script>
 </body>
