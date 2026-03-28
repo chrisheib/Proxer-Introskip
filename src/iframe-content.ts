@@ -394,6 +394,8 @@ function iInjectFrameHashButton(video: HTMLVideoElement, seriesId: string): void
         button.textContent = 'Save Skipframe';
         button.title = 'Save skipframe hashes for auto-skip detection';
         button.style.marginLeft = '8px';
+        button.style.height = '32px';
+        button.style.padding = '0px 5px';
 
         button.addEventListener('click', async () => {
             button.disabled = true;
