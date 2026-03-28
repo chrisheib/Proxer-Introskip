@@ -34,13 +34,13 @@ function getEpisodeKey() {
     return null;
 }
 
-function waitForPlayer() {
+function waitForPlayer(): Promise<Plyr> {
     console.log('[Proxer Skip] Waiting for Plyr player...');
     return new Promise((resolve) => {
         const check = () => {
             const playerElement = document.querySelector('#player');
-            const player = (playerElement as any)?.plyr;
-            if (player && player.ready) {
+            const player = (playerElement as HTMLElement & { plyr?: Plyr })?.plyr;
+            if (player) {
                 console.log('[Proxer Skip] Plyr player found and ready');
                 resolve(player);
             } else {
@@ -51,7 +51,7 @@ function waitForPlayer() {
     });
 }
 
-function addSkipButton(player) {
+function addSkipButton(player: Plyr): void {
     console.log('[Proxer Skip] Adding skip button');
     const button = document.createElement('button');
     button.textContent = 'Set Skip Time';
@@ -72,9 +72,11 @@ function addSkipButton(player) {
         if (time && !isNaN(Number(time))) {
             const episodeKey = getEpisodeKey();
             console.log('[Proxer Skip] Saving skip time for', episodeKey, ':', time);
-            chrome.storage.local.get(['episodes'], (data) => {
+            chrome.storage.local.get(['episodes'], (data: { [key: string]: any }) => {
                 const episodes = data.episodes || {};
-                episodes[episodeKey] = { skipTime: parseInt(time) };
+                if (episodeKey !== null) {
+                    episodes[episodeKey] = { skipTime: parseInt(time, 10) };
+                }
                 chrome.storage.local.set({ episodes });
                 console.log('[Proxer Skip] Skip time saved');
                 alert('Skip time saved!');
@@ -86,6 +88,10 @@ function addSkipButton(player) {
     };
     // Append to player's container
     const container = player.elements.container;
+    if (!container) {
+        console.warn('[Proxer Skip] Player container not found');
+        return;
+    }
     container.style.position = 'relative';
     container.appendChild(button);
     console.log('[Proxer Skip] Skip button added');

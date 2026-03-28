@@ -1,5 +1,7 @@
 // Content script for stream.proxer.me iframe
 
+type Result<T> = { ok: true; value: T } | { ok: false; error: string };
+
 const FRAME_HASH_BUTTON_CLASS = 'proxer-save-framehash-btn';
 const DEFAULT_SKIP_DURATION = 85;
 const DEFAULT_MATCH_THRESHOLD = 10;
@@ -83,7 +85,7 @@ function iWaitForPlayer(): Promise<HTMLVideoElement> {
 }
 
 /** Derives the series identifier from the episode key for cross-episode hash reuse. */
-function iGetSeriesId(episodeKey) {
+function iGetSeriesId(episodeKey: string | null): string | null {
     if (!episodeKey || !episodeKey.includes('-')) {
         return null;
     }
@@ -92,12 +94,12 @@ function iGetSeriesId(episodeKey) {
 }
 
 /** Returns the storage key used for one series' skipframe data. */
-function iGetSeriesSkipframesStorageKey(seriesId) {
+function iGetSeriesSkipframesStorageKey(seriesId: string): string {
     return `seriesSkipframes:${seriesId}`;
 }
 
 /** Provides a shared async delay helper for spacing multi-frame hash captures. */
-function iSleep(ms) {
+function iSleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -118,7 +120,7 @@ function iGetOrCreateHashCanvas(): HTMLCanvasElement {
 }
 
 /** Converts tiny frame pixels into a deterministic dHash bitstring for similarity matching. */
-function iComputeDHashFromImageData(imageData, width, height) {
+function iComputeDHashFromImageData(imageData: ImageData, width: number, height: number): string {
     const bytes = imageData.data;
     const luminance = new Array(width * height);
 
@@ -144,28 +146,28 @@ function iComputeDHashFromImageData(imageData, width, height) {
 }
 
 /** Captures the current video frame and returns its perceptual hash marker. */
-function iCaptureCurrentFrameHash(video) {
+function iCaptureCurrentFrameHash(video: HTMLVideoElement): Result<string> {
     if (!video || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) {
-        throw new Error('Video frame is not ready for hashing');
+        return { ok: false, error: 'Video frame is not ready for hashing' };
     }
 
     const canvas = iGetOrCreateHashCanvas();
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) {
-        throw new Error('Unable to initialize 2D canvas context');
+        return { ok: false, error: 'Unable to initialize 2D canvas context' };
     }
 
     canvas.width = 9;
     canvas.height = 8;
     ctx.drawImage(video, 0, 0, 9, 8);
     const imageData = ctx.getImageData(0, 0, 9, 8);
-    return iComputeDHashFromImageData(imageData, 9, 8);
+    return { ok: true, value: iComputeDHashFromImageData(imageData, 9, 8) };
 }
 
 /** Captures a small frame thumbnail used for popup hover previews. */
-function iCaptureCurrentFrameThumbnail(video) {
+function iCaptureCurrentFrameThumbnail(video: HTMLVideoElement): Result<string> {
     if (!video || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) {
-        throw new Error('Video frame is not ready for thumbnail capture');
+        return { ok: false, error: 'Video frame is not ready for thumbnail capture' };
     }
 
     const thumbCanvas = document.createElement('canvas');
@@ -174,15 +176,15 @@ function iCaptureCurrentFrameThumbnail(video) {
 
     const thumbCtx = thumbCanvas.getContext('2d', { willReadFrequently: true });
     if (!thumbCtx) {
-        throw new Error('Unable to initialize thumbnail canvas context');
+        return { ok: false, error: 'Unable to initialize thumbnail canvas context' };
     }
 
     thumbCtx.drawImage(video, 0, 0, thumbCanvas.width, thumbCanvas.height);
-    return thumbCanvas.toDataURL('image/jpeg', 0.7);
+    return { ok: true, value: thumbCanvas.toDataURL('image/jpeg', 0.7) };
 }
 
 /** Computes hash similarity as Hamming distance for threshold-based jump decisions. */
-function iHammingDistance(a, b) {
+function iHammingDistance(a: string | null | undefined, b: string | null | undefined): number {
     if (!a || !b || a.length !== b.length) {
         return Number.POSITIVE_INFINITY;
     }
@@ -198,28 +200,27 @@ function iHammingDistance(a, b) {
 }
 
 /** Persists per-episode time-based skip configuration as compatibility fallback behavior. */
-async function iSaveSkipTime(episodeKey, timeSeconds) {
+async function iSaveSkipTime(episodeKey: string, timeSeconds: string | number): Promise<void> {
     const data = await chrome.storage.local.get(['episodes']);
     const episodes = data.episodes || {};
     episodes[episodeKey] = {
         ...(episodes[episodeKey] || {}),
-        skipTime: Number.parseInt(timeSeconds, 10),
+        skipTime: Number.parseInt(String(timeSeconds), 10),
         skipDuration: (episodes[episodeKey] && episodes[episodeKey].skipDuration) || DEFAULT_SKIP_DURATION
     };
     await chrome.storage.local.set({ episodes });
 }
 
 /** Persists and deduplicates series-level frame hash markers used for future episode detection. */
-async function iSaveSeriesFrameHashes(seriesId, markers) {
+async function iSaveSeriesFrameHashes(seriesId: string, markers: Array<{ hash: string; thumbnail?: string }>) {
     const skipframesStorageKey = iGetSeriesSkipframesStorageKey(seriesId);
     const data = await chrome.storage.local.get([skipframesStorageKey]);
     const seriesSkipframes = data[skipframesStorageKey] || {};
     const existingHashes = Array.isArray(seriesSkipframes.frameHashes) ? seriesSkipframes.frameHashes : [];
     const existingEntries = Array.isArray(seriesSkipframes.frameHashEntries) ? seriesSkipframes.frameHashEntries : [];
-    const dedupMap = {};
+    const dedupMap: Record<string, { hash: string; thumbnail: string }> = {};
 
-    for (let i = 0; i < existingEntries.length; i += 1) {
-        const entry = existingEntries[i];
+    for (const entry of existingEntries) {
         if (entry && entry.hash) {
             dedupMap[entry.hash] = {
                 hash: entry.hash,
@@ -228,15 +229,13 @@ async function iSaveSeriesFrameHashes(seriesId, markers) {
         }
     }
 
-    for (let i = 0; i < existingHashes.length; i += 1) {
-        const hash = existingHashes[i];
+    for (const hash of existingHashes) {
         if (hash && !dedupMap[hash]) {
             dedupMap[hash] = { hash, thumbnail: '' };
         }
     }
 
-    for (let i = 0; i < markers.length; i += 1) {
-        const marker = markers[i];
+    for (const marker of markers) {
         if (!marker || !marker.hash) {
             continue;
         }
@@ -249,13 +248,12 @@ async function iSaveSeriesFrameHashes(seriesId, markers) {
     }
 
     const frameHashEntries = [];
-    const dedupKeys = Object.keys(dedupMap);
-    for (let i = 0; i < dedupKeys.length; i += 1) {
-        frameHashEntries.push(dedupMap[dedupKeys[i]]);
+    for (const key of Object.keys(dedupMap)) {
+        frameHashEntries.push(dedupMap[key]);
     }
     const frameHashes = [];
-    for (let i = 0; i < frameHashEntries.length; i += 1) {
-        frameHashes.push(frameHashEntries[i].hash);
+    for (const entry of frameHashEntries) {
+        frameHashes.push(entry.hash);
     }
 
     await chrome.storage.local.set({
@@ -294,7 +292,7 @@ async function iGetGlobalSkipframeSettings() {
 }
 
 /** Shows a short-lived toast at the old top-right Set Skip Time button position. */
-function iShowSaveToast(video, message) {
+function iShowSaveToast(video: HTMLVideoElement, message: string): void {
     const container = video.parentElement || document.body;
     container.style.position = 'relative';
 
@@ -335,7 +333,7 @@ function iShowSaveToast(video, message) {
 }
 
 /** Adds the manual skip-time setup button for episodes without existing timing data. */
-function iAddSkipButton(video, episodeKey) {
+function iAddSkipButton(video: HTMLVideoElement, episodeKey: string): void {
     console.log('[Proxer Skip] [IFRAME] Adding skip button');
     const button = document.createElement('button');
     button.textContent = 'Set Skip Time';
@@ -377,7 +375,7 @@ function iAddSkipButton(video, episodeKey) {
 }
 
 /** Injects the control-bar framehash button that records marker hashes from the live frame. */
-function iInjectFrameHashButton(video, seriesId) {
+function iInjectFrameHashButton(video: HTMLVideoElement, seriesId: string): void {
     const insertButton = () => {
         const controls = document.querySelector('.plyr__controls');
         const currentTime = document.querySelector('.plyr__time.plyr__time--current');
@@ -403,10 +401,16 @@ function iInjectFrameHashButton(video, seriesId) {
             button.textContent = 'Saving...';
 
             try {
-                const firstHash = iCaptureCurrentFrameHash(video);
-                const firstThumbnail = iCaptureCurrentFrameThumbnail(video);
+                const hashResult = iCaptureCurrentFrameHash(video);
+                const thumbResult = iCaptureCurrentFrameThumbnail(video);
+                if (hashResult.ok === false) {
+                    throw new Error(hashResult.error);
+                }
+                if (thumbResult.ok === false) {
+                    throw new Error(thumbResult.error);
+                }
                 const profile = await iSaveSeriesFrameHashes(seriesId, [
-                    { hash: firstHash, thumbnail: firstThumbnail }
+                    { hash: hashResult.value, thumbnail: thumbResult.value }
                 ]);
                 console.log('[Proxer Skip] [IFRAME] Saved frame hash list for series', seriesId, profile);
                 iShowSaveToast(video, `Saved skipframe (${profile.frameHashes.length} total)`);
@@ -438,9 +442,9 @@ function iInjectFrameHashButton(video, seriesId) {
 }
 
 /** Runs the bounded hash scan loop that auto-jumps when a saved marker is detected. */
-function iStartFrameHashMatching(video, seriesId) {
+function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): void {
     const skipframesStorageKey = iGetSeriesSkipframesStorageKey(seriesId);
-    chrome.storage.local.get([skipframesStorageKey], async (data) => {
+    chrome.storage.local.get([skipframesStorageKey], async (data: { [key: string]: any }) => {
         const seriesSkipframes = data[skipframesStorageKey] || {};
         const hashes = Array.isArray(seriesSkipframes.frameHashes) ? seriesSkipframes.frameHashes : [];
 
@@ -463,7 +467,7 @@ function iStartFrameHashMatching(video, seriesId) {
             hashCount: hashes.length,
             debounceMs: DEFAULT_MATCH_DEBOUNCE_MS
         });
-        const intervalId = setInterval(() => {
+        setInterval(() => {
             if (video.ended || video.paused) {
                 return;
             }
@@ -474,18 +478,16 @@ function iStartFrameHashMatching(video, seriesId) {
 
             const now = video.currentTime;
 
-            let currentHash;
-            try {
-                currentHash = iCaptureCurrentFrameHash(video);
-            } catch (error) {
-                console.warn('[Proxer Skip] [IFRAME] Frame hash capture unavailable:', error);
-                // clearInterval(intervalId);
+            const hashResult = iCaptureCurrentFrameHash(video);
+            if (hashResult.ok === false) {
+                console.warn('[Proxer Skip] [IFRAME] Frame hash capture unavailable:', hashResult.error);
                 return;
             }
+            const currentHash = hashResult.value;
             // console.log('[Proxer Skip] [IFRAME] Captured current frame hash at', now, ':', currentHash);
 
-            for (let i = 0; i < hashes.length; i += 1) {
-                const distance = iHammingDistance(currentHash, hashes[i]);
+            for (const hash of hashes) {
+                const distance = iHammingDistance(currentHash, hash);
                 if (distance <= threshold) {
                     const jumpTarget = now + skipDuration;
                     console.log('[Proxer Skip] [IFRAME] Frame hash matched; jumping to', jumpTarget, 'distance', distance);
