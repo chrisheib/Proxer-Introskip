@@ -32,15 +32,23 @@
     "action": {
         "default_popup": "popup.html",
         "default_title": "Proxer Skip Settings",
-        "default_icon": "icon.png"
+        "default_icon": "icon-128x128.png"
     },
     "icons": {
-        "128": "icon.png"
+        "128": "icon-128x128.png"
     },
     "browser_specific_settings": {
         "gecko": {
             "id": "proxer-anime-skip@stschiff.dev",
-            "strict_min_version": "121.0"
+            "strict_min_version": "140.0",
+            "data_collection_permissions": {
+                "required": [
+                    "websiteContent"
+                ]
+            }
+        },
+        "gecko_android": {
+            "strict_min_version": "142.0"
         }
     }
 }

@@ -20,6 +20,7 @@ manifest.json
 manifest.firefox.json
 popup.html
 icon.png
+icon-128x128.png
 dist/content.js
 dist/iframe-content.js
 dist/popup.js
@@ -53,6 +54,7 @@ archive_files="
 manifest.json
 popup.html
 icon.png
+icon-128x128.png
 dist
 "
 
@@ -78,13 +80,14 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 mkdir -p "$tmp_dir/dist"
 cp manifest.firefox.json "$tmp_dir/manifest.json"
-cp popup.html icon.png "$tmp_dir/"
+cp popup.html icon.png icon-128x128.png "$tmp_dir/"
 cp dist/content.js dist/iframe-content.js dist/popup.js "$tmp_dir/dist/"
 
 pack_zip "$firefox_outfile" \
   "$tmp_dir/manifest.json" \
   "$tmp_dir/popup.html" \
   "$tmp_dir/icon.png" \
+  "$tmp_dir/icon-128x128.png" \
   "$tmp_dir/dist"
 
 echo "Pack complete: $outfile"
