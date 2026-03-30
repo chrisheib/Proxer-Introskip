@@ -80,6 +80,10 @@
         .global-setting-row input {
             width: 70px;
         }
+
+        .global-setting-row input[type="checkbox"] {
+            width: auto;
+        }
     </style>
 </head>
 
@@ -107,10 +111,15 @@
         <label for="global-refresh-input">Aktualisierung (ms)</label>
         <input id="global-refresh-input" type="number" min="10" step="1">
     </div>
+    <div class="global-setting-row">
+        <label for="global-sound-fade-toggle">Sound Fade bei Skip</label>
+        <input id="global-sound-fade-toggle" type="checkbox">
+    </div>
+    <div class="global-setting-row">
+        <label for="auto-mirror-toggle">Automatisch auf roten Proxer-Player wechseln</label>
+        <input type="checkbox" id="auto-mirror-toggle">
+    </div>
     <hr>
-    <label>
-        <input type="checkbox" id="auto-mirror-toggle"> Automatisch auf roten Proxer-Player wechseln
-    </label>
     <script src="dist/popup.js"></script>
 </body>
 

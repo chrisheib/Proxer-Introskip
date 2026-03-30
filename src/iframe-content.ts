@@ -381,11 +381,15 @@ async function iGetGlobalSkipframeSettings() {
     const refreshMs = Number.isFinite(raw.refreshMs) && raw.refreshMs >= 10
         ? raw.refreshMs
         : DEFAULT_SCAN_INTERVAL_MS;
+    const soundFade = typeof raw.soundFade === 'boolean'
+        ? raw.soundFade
+        : true;
 
     return {
         threshold,
         skipDuration,
-        refreshMs
+        refreshMs,
+        soundFade
     };
 }
 
@@ -557,6 +561,7 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
         const threshold = settings.threshold;
         const skipDuration = settings.skipDuration;
         const refreshMs = settings.refreshMs;
+        const soundFade = settings.soundFade;
 
         let debounceUntilMs = 0;
         let consecutiveCaptureFailures = 0;
@@ -610,7 +615,11 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
                 if (distance <= threshold) {
                     const jumpTarget = now + skipDuration;
                     console.log('[Proxer Skip] [IFRAME] Frame hash matched; jumping to', jumpTarget, 'distance', distance);
-                    iSeekWithAudioFade(video, jumpTarget);
+                    if (soundFade) {
+                        iSeekWithAudioFade(video, jumpTarget);
+                    } else {
+                        video.currentTime = jumpTarget;
+                    }
                     debounceUntilMs = Date.now() + DEFAULT_MATCH_DEBOUNCE_MS;
                     return;
                 }

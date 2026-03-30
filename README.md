@@ -20,6 +20,11 @@ tbd
 
 tbd
 
+## Features
+
+### 2026-03-31 - Global sound fade option
+Fügt eine globale Einstellung hinzu, um nach dem Skippen einen Audio-Fade einzuschalten, um nicht das Trommelfell zu verlieren.
+
 ## Entwicklung
 
 ### Build
