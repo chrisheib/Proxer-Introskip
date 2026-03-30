@@ -24,11 +24,17 @@ function getEpisodeKey() {
         return;
     }
 
-    let iframe = document.querySelector('iframe');
+    const iframe = document.querySelector('iframe');
     if (iframe) {
         if (iframe.src.includes('https://stream-service.proxer.me/embed')) {
-            iframe.src += '&ep=' + episodeKey; // Pass episode key
-            console.log('[Proxer Skip] Iframe found, passing episode key:', episodeKey);
+            try {
+                const iframeUrl = new URL(iframe.src);
+                iframeUrl.searchParams.set('ep', episodeKey);
+                iframe.src = iframeUrl.toString();
+                console.log('[Proxer Skip] Iframe found, passing episode key:', episodeKey);
+            } catch (error) {
+                console.warn('[Proxer Skip] Failed to append ep to iframe URL:', error);
+            }
         }
     }
 

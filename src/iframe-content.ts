@@ -7,7 +7,39 @@ const DEFAULT_SKIP_DURATION = 85;
 const DEFAULT_MATCH_THRESHOLD = 10;
 const DEFAULT_SCAN_INTERVAL_MS = 1000 / 30; // 30 FPS
 const DEFAULT_MATCH_DEBOUNCE_MS = 3000;
+const MAX_CONSECUTIVE_CAPTURE_FAILURES = 30;
 const GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
+
+/** Returns true when the iframe host is one of the supported stream players. */
+function iIsSupportedIframeHost(): boolean {
+    return window.location.hostname === 'stream.proxer.me' || window.location.hostname === 'stream-service.proxer.me';
+}
+
+/** Logs key iframe context fields that help diagnose provider-specific init and parsing issues. */
+function iLogIframeContext(): void {
+    console.log('[Proxer Skip] [IFRAME] Context:', {
+        host: window.location.hostname,
+        path: window.location.pathname,
+        search: window.location.search
+    });
+}
+
+/** Resolves the preferred video element for supported players, using id-first fallback logic. */
+function iGetPlayerVideoElement(): HTMLVideoElement | null {
+    const preferred = document.querySelector('#player');
+    if (preferred instanceof HTMLVideoElement) {
+        return preferred;
+    }
+
+    const fallback = document.querySelector('video');
+    return fallback instanceof HTMLVideoElement ? fallback : null;
+}
+
+/** Resolves the current-time controls node used as insertion anchor for the save button. */
+function iGetCurrentTimeControlAnchor(): Element | null {
+    return document.querySelector('.plyr__time.plyr__time--current')
+        || document.querySelector('.plyr__controls__item.plyr__time--current.plyr__time');
+}
 
 /** Loads and initializes persisted episode and series data used by both skip strategies. */
 async function iLoadData() {
@@ -39,6 +71,7 @@ async function iLoadData() {
 /** Resolves the current episode key so all skip and hash data can be scoped correctly. */
 function iGetEpisodeKey() {
     console.log('[Proxer Skip] [IFRAME] Parsing episode key from iframe...');
+    iLogIframeContext();
     const urlParams = new URLSearchParams(window.location.search);
     const ref = urlParams.get('ref');
     console.log('[Proxer Skip] [IFRAME] Ref parameter:', ref);
@@ -71,12 +104,20 @@ function iGetEpisodeKey() {
 function iWaitForPlayer(): Promise<HTMLVideoElement> {
     console.log('[Proxer Skip] [IFRAME] Waiting for Plyr player...');
     return new Promise((resolve) => {
+        let attempts = 0;
         const check = () => {
-            const video = document.querySelector('video');
+            attempts += 1;
+            const video = iGetPlayerVideoElement();
             if (video) {
                 console.log('[Proxer Skip] [IFRAME] Plyr player found and ready');
                 resolve(video);
             } else {
+                if (attempts % 20 === 0) {
+                    console.log('[Proxer Skip] [IFRAME] Waiting for player video element...', {
+                        attempts,
+                        host: window.location.hostname
+                    });
+                }
                 setTimeout(check, 100);
             }
         };
@@ -378,7 +419,7 @@ function iAddSkipButton(video: HTMLVideoElement, episodeKey: string): void {
 function iInjectFrameHashButton(video: HTMLVideoElement, seriesId: string): void {
     const insertButton = () => {
         const controls = document.querySelector('.plyr__controls');
-        const currentTime = document.querySelector('.plyr__time.plyr__time--current');
+        const currentTime = iGetCurrentTimeControlAnchor();
 
         if (!controls || !currentTime) {
             return false;
@@ -461,6 +502,7 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
         const refreshMs = settings.refreshMs;
 
         let debounceUntilMs = 0;
+        let consecutiveCaptureFailures = 0;
         console.log('[Proxer Skip] [IFRAME] Starting frame hash matching with profile:', {
             seriesId,
             threshold,
@@ -469,8 +511,13 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
             hashCount: hashes.length,
             debounceMs: DEFAULT_MATCH_DEBOUNCE_MS
         });
-        setInterval(() => {
+
+        const intervalId = setInterval(() => {
             if (video.ended || video.paused) {
+                return;
+            }
+
+            if (video.readyState < 2) {
                 return;
             }
 
@@ -482,9 +529,22 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
 
             const hashResult = iCaptureCurrentFrameHash(video);
             if (hashResult.ok === false) {
-                console.warn('[Proxer Skip] [IFRAME] Frame hash capture unavailable:', hashResult.error);
+                consecutiveCaptureFailures += 1;
+                if (consecutiveCaptureFailures === 1 || consecutiveCaptureFailures % 10 === 0) {
+                    console.warn('[Proxer Skip] [IFRAME] Frame hash capture unavailable:', {
+                        error: hashResult.error,
+                        consecutiveCaptureFailures
+                    });
+                }
+
+                if (consecutiveCaptureFailures >= MAX_CONSECUTIVE_CAPTURE_FAILURES) {
+                    console.warn('[Proxer Skip] [IFRAME] Stopping frame hash matching after repeated capture failures');
+                    clearInterval(intervalId);
+                }
                 return;
             }
+
+            consecutiveCaptureFailures = 0;
             const currentHash = hashResult.value;
             // console.log('[Proxer Skip] [IFRAME] Captured current frame hash at', now, ':', currentHash);
 
@@ -504,6 +564,11 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
 
 (async () => {
     console.log('[Proxer Skip] [IFRAME] Content script started');
+    if (!iIsSupportedIframeHost()) {
+        console.log('[Proxer Skip] [IFRAME] Unsupported host, exiting early:', window.location.hostname);
+        return;
+    }
+
     // console.log('[Proxer Skip] [IFRAME] Full HTML:', document.documentElement.outerHTML);
     const video = await iWaitForPlayer();
     const episodeKey = iGetEpisodeKey();
