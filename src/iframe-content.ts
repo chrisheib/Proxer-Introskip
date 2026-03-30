@@ -7,8 +7,65 @@ const DEFAULT_SKIP_DURATION = 85;
 const DEFAULT_MATCH_THRESHOLD = 10;
 const DEFAULT_SCAN_INTERVAL_MS = 1000 / 30; // 30 FPS
 const DEFAULT_MATCH_DEBOUNCE_MS = 3000;
+const AUDIO_FADE_DURATION_MS = 500;
 const MAX_CONSECUTIVE_CAPTURE_FAILURES = 30;
 const GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
+let iActiveVolumeFadeRaf: number | null = null;
+
+/** Clamps any input volume to the valid HTMLMediaElement range. */
+function iClampVolume(volume: number): number {
+    if (!Number.isFinite(volume)) {
+        return 1;
+    }
+
+    if (volume < 0) {
+        return 0;
+    }
+
+    if (volume > 1) {
+        return 1;
+    }
+
+    return volume;
+}
+
+/** Seeks the video and smooths post-seek audio by fading from 0 to the prior level over 500 ms. */
+function iSeekWithAudioFade(video: HTMLVideoElement, targetTime: number): void {
+    const targetVolume = iClampVolume(video.volume);
+    if (video.muted || targetVolume <= 0) {
+        video.currentTime = targetTime;
+        return;
+    }
+
+    if (iActiveVolumeFadeRaf !== null) {
+        cancelAnimationFrame(iActiveVolumeFadeRaf);
+        iActiveVolumeFadeRaf = null;
+    }
+
+    video.volume = 0;
+    video.currentTime = targetTime;
+
+    let fadeStart: number | null = null;
+    const tick = (now: number) => {
+        if (fadeStart === null) {
+            fadeStart = now;
+        }
+
+        const elapsed = now - fadeStart;
+        const rawProgress = elapsed / AUDIO_FADE_DURATION_MS;
+        const progress = Math.max(0, Math.min(1, rawProgress));
+        if (progress >= 1) {
+            video.volume = iClampVolume(targetVolume);
+            iActiveVolumeFadeRaf = null;
+            return;
+        }
+
+        video.volume = iClampVolume(targetVolume * progress);
+        iActiveVolumeFadeRaf = requestAnimationFrame(tick);
+    };
+
+    iActiveVolumeFadeRaf = requestAnimationFrame(tick);
+}
 
 /** Returns true when the iframe host is one of the supported stream players. */
 function iIsSupportedIframeHost(): boolean {
@@ -553,7 +610,7 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
                 if (distance <= threshold) {
                     const jumpTarget = now + skipDuration;
                     console.log('[Proxer Skip] [IFRAME] Frame hash matched; jumping to', jumpTarget, 'distance', distance);
-                    video.currentTime = jumpTarget;
+                    iSeekWithAudioFade(video, jumpTarget);
                     debounceUntilMs = Date.now() + DEFAULT_MATCH_DEBOUNCE_MS;
                     return;
                 }
