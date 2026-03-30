@@ -16,6 +16,81 @@ function getEpisodeKey() {
     return null;
 }
 
+function syncBlueIframeEpisodeKey(episodeKey: string) {
+    const container = document.querySelector('.wStream');
+    if (!container) {
+        return;
+    }
+
+    const iframe = container.querySelector('iframe');
+    if (!iframe) {
+        return;
+    }
+
+    const src = iframe.getAttribute('src') || iframe.src || '';
+    if (!src) {
+        return;
+    }
+
+    try {
+        const iframeUrl = new URL(src, window.location.href);
+        if (iframeUrl.hostname !== 'stream-service.proxer.me' || !iframeUrl.pathname.startsWith('/embed-')) {
+            return;
+        }
+
+        if (iframeUrl.searchParams.get('ep') === episodeKey) {
+            return;
+        }
+
+        iframeUrl.searchParams.set('ep', episodeKey);
+        iframe.src = iframeUrl.toString();
+        console.log('[Proxer Skip] Synced blue iframe ep key:', episodeKey);
+    } catch (error) {
+        console.warn('[Proxer Skip] Failed to sync blue iframe ep key:', error);
+    }
+}
+
+function observeWStreamIframe(episodeKey: string) {
+    const tryAttach = (attempt: number) => {
+        const container = document.querySelector('.wStream');
+        if (!container) {
+            if (attempt < 40) {
+                setTimeout(() => {
+                    tryAttach(attempt + 1);
+                }, 250);
+            }
+            return;
+        }
+
+        syncBlueIframeEpisodeKey(episodeKey);
+
+        const observer = new MutationObserver((mutations) => {
+            for (let i = 0; i < mutations.length; i += 1) {
+                const mutation = mutations[i];
+
+                if (mutation.type === 'attributes' && mutation.attributeName === 'src' && mutation.target instanceof HTMLIFrameElement) {
+                    syncBlueIframeEpisodeKey(episodeKey);
+                    return;
+                }
+
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    syncBlueIframeEpisodeKey(episodeKey);
+                    return;
+                }
+            }
+        });
+
+        observer.observe(container, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ['src']
+        });
+    };
+
+    tryAttach(0);
+}
+
 (async () => {
     console.log('[Proxer Skip] Content script started');
     const episodeKey = getEpisodeKey();
@@ -24,19 +99,7 @@ function getEpisodeKey() {
         return;
     }
 
-    const iframe = document.querySelector('iframe');
-    if (iframe) {
-        if (iframe.src.includes('https://stream-service.proxer.me/embed')) {
-            try {
-                const iframeUrl = new URL(iframe.src);
-                iframeUrl.searchParams.set('ep', episodeKey);
-                iframe.src = iframeUrl.toString();
-                console.log('[Proxer Skip] Iframe found, passing episode key:', episodeKey);
-            } catch (error) {
-                console.warn('[Proxer Skip] Failed to append ep to iframe URL:', error);
-            }
-        }
-    }
+    observeWStreamIframe(episodeKey);
 
     // 2 seconds after load, auto-select the Proxer-Stream mirror if present and not active.
     setTimeout(async () => {
