@@ -74,7 +74,7 @@ function iIsSupportedIframeHost(): boolean {
 
 /** Logs key iframe context fields that help diagnose provider-specific init and parsing issues. */
 function iLogIframeContext(): void {
-    console.log('[Proxer Skip] [IFRAME] Context:', {
+    console.debug('[Proxer Skip] [IFRAME] Context:', {
         host: window.location.hostname,
         path: window.location.pathname,
         search: window.location.search
@@ -98,27 +98,52 @@ function iGetCurrentTimeControlAnchor(): Element | null {
         || document.querySelector('.plyr__controls__item.plyr__time--current.plyr__time');
 }
 
+/** Extracts video ID from pathname like /embed-<id>-<size>.html (red player). */
+function iExtractVideoIdFromPathname(): string | null {
+    console.debug('[Proxer Skip] [IFRAME] Extracting video ID from pathname:', window.location.pathname);
+    const match = window.location.pathname.match(/^\/embed-([A-Za-z0-9]+)(?:-\d+x\d+)?\.html$/);
+    return match ? match[1] : null;
+}
+
+/** Extracts blue stream id forwarded by host page via iframe URL parameter. */
+function iGetBlueStreamIdFromUrlParam(): string | null {
+    const urlParams = new URLSearchParams(window.location.search);
+    const bsid = urlParams.get('bsid');
+    if (!bsid || bsid.trim().length === 0) {
+        return null;
+    }
+
+    return bsid.trim();
+}
+
+/** Injects VTT preview track for red player if not already present.
+ * This should construct a vtt track from the passed bsid like `https://stream-service-cdn.proxer.me/vtt/${videoId}/${videoId}.vtt`
+ * But it seems the plyr used in the red player is too old for previews.
+ * function iInjectPreviewTrack(video: HTMLVideoElement, videoId: string): void {
+ */
+
+
 /** Loads and initializes persisted episode and series data used by both skip strategies. */
 async function iLoadData() {
-    console.log('[Proxer Skip] [IFRAME] Loading data...');
+    console.debug('[Proxer Skip] [IFRAME] Loading data...');
     let data = await chrome.storage.local.get(['episodes', 'seriesProfiles']);
-    if (!data.episodes) {
-        console.log('[Proxer Skip] [IFRAME] No data in storage, initializing empty...');
-        const initialData = {
-            episodes: {
-                "75169-8": {
-                    "skipTime": 51,
-                    "skipDuration": 85
-                }
-            },
-            seriesProfiles: {}
-        };
-        await chrome.storage.local.set(initialData);
-        data = initialData;
-        console.log('[Proxer Skip] [IFRAME] Storage initialized:', data);
-    } else {
-        console.log('[Proxer Skip] [IFRAME] Data loaded from storage:', data);
-    }
+    // if (!data.episodes) {
+    //     console.debug('[Proxer Skip] [IFRAME] No data in storage, initializing empty...');
+    //     const initialData = {
+    //         episodes: {
+    //             "75169-8": {
+    //                 "skipTime": 51,
+    //                 "skipDuration": 85
+    //             }
+    //         },
+    //         seriesProfiles: {}
+    //     };
+    //     await chrome.storage.local.set(initialData);
+    //     data = initialData;
+    //     console.log('[Proxer Skip] [IFRAME] Storage initialized:', data);
+    // } else {
+    //     console.log('[Proxer Skip] [IFRAME] Data loaded from storage:', data);
+    // }
     return {
         episodes: data.episodes || {},
         seriesProfiles: data.seriesProfiles || {}
@@ -127,11 +152,11 @@ async function iLoadData() {
 
 /** Resolves the current episode key so all skip and hash data can be scoped correctly. */
 function iGetEpisodeKey() {
-    console.log('[Proxer Skip] [IFRAME] Parsing episode key from iframe...');
+    console.debug('[Proxer Skip] [IFRAME] Parsing episode key from iframe...');
     iLogIframeContext();
     const urlParams = new URLSearchParams(window.location.search);
     const ref = urlParams.get('ref');
-    console.log('[Proxer Skip] [IFRAME] Ref parameter:', ref);
+    console.debug('[Proxer Skip] [IFRAME] Ref parameter:', ref);
 
     if (ref) {
         // Ref format: /watch/series-id/episode-number/...
@@ -140,17 +165,17 @@ function iGetEpisodeKey() {
             const seriesId = parts[2];
             const episodeNumber = parts[3];
             const key = `${seriesId}-${episodeNumber}`;
-            console.log('[Proxer Skip] [IFRAME] Episode key:', key);
+            console.debug('[Proxer Skip] [IFRAME] Episode key:', key);
             return key;
         }
     }
-    console.log('[Proxer Skip] [IFRAME] Unable to parse episode key from ref');
+    console.debug('[Proxer Skip] [IFRAME] Unable to parse episode key from ref');
 
     if (window.location.search.includes('&ep=')) {
         const urlParams = new URLSearchParams(window.location.search);
         const ep = urlParams.get('ep');
         if (ep) {
-            console.log('[Proxer Skip] [IFRAME] Episode key from URL parameter:', ep);
+            console.debug('[Proxer Skip] [IFRAME] Episode key from URL parameter:', ep);
             return ep;
         }
     }
@@ -159,7 +184,7 @@ function iGetEpisodeKey() {
 
 /** Waits for the iframe video element so frame capture and seeking can start safely. */
 function iWaitForPlayer(): Promise<HTMLVideoElement> {
-    console.log('[Proxer Skip] [IFRAME] Waiting for Plyr player...');
+    console.debug('[Proxer Skip] [IFRAME] Waiting for Plyr player...');
     return new Promise((resolve) => {
         let attempts = 0;
         const check = () => {
@@ -170,7 +195,7 @@ function iWaitForPlayer(): Promise<HTMLVideoElement> {
                 resolve(video);
             } else {
                 if (attempts % 20 === 0) {
-                    console.log('[Proxer Skip] [IFRAME] Waiting for player video element...', {
+                    console.debug('[Proxer Skip] [IFRAME] Waiting for player video element...', {
                         attempts,
                         host: window.location.hostname
                     });
@@ -434,48 +459,6 @@ function iShowSaveToast(video: HTMLVideoElement, message: string): void {
     }, 1800);
 }
 
-/** Adds the manual skip-time setup button for episodes without existing timing data. */
-function iAddSkipButton(video: HTMLVideoElement, episodeKey: string): void {
-    console.log('[Proxer Skip] [IFRAME] Adding skip button');
-    const button = document.createElement('button');
-    button.textContent = 'Set Skip Time';
-    button.style.cssText = `
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 1000;
-    background: rgba(0,0,0,0.7);
-    color: white;
-    border: none;
-    padding: 5px 10px;
-    cursor: pointer;
-    border-radius: 4px;
-  `;
-    button.onclick = async () => {
-        console.log('[Proxer Skip] [IFRAME] Skip button clicked');
-        const time = prompt('Enter skip time in seconds (e.g., 90 for opening):');
-        if (time && !isNaN(Number(time))) {
-            console.log('[Proxer Skip] [IFRAME] Saving skip time for', episodeKey, ':', time);
-            try {
-                await iSaveSkipTime(episodeKey, time);
-                console.log('[Proxer Skip] [IFRAME] Skip time saved');
-                alert('Skip time saved!');
-                button.remove();
-            } catch (error) {
-                console.error('[Proxer Skip] [IFRAME] Failed to save skip time:', error);
-                alert('Failed to save skip time. See console for details.');
-            }
-        } else {
-            console.log('[Proxer Skip] [IFRAME] Invalid time entered:', time);
-        }
-    };
-
-    const container = video.parentElement || document.body;
-    container.style.position = 'relative';
-    container.appendChild(button);
-    console.log('[Proxer Skip] [IFRAME] Skip button added');
-}
-
 /** Injects the control-bar framehash button that records marker hashes from the live frame. */
 function iInjectFrameHashButton(video: HTMLVideoElement, seriesId: string): void {
     const insertButton = () => {
@@ -528,7 +511,7 @@ function iInjectFrameHashButton(video: HTMLVideoElement, seriesId: string): void
         });
 
         currentTime.insertAdjacentElement('afterend', button);
-        console.log('[Proxer Skip] [IFRAME] Save Framehash button inserted after current time element');
+        console.debug('[Proxer Skip] [IFRAME] Save Framehash button inserted after current time element');
         return true;
     };
 
@@ -553,7 +536,7 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
         const hashes = Array.isArray(seriesSkipframes.frameHashes) ? seriesSkipframes.frameHashes : [];
 
         if (!hashes.length) {
-            console.log('[Proxer Skip] [IFRAME] No frame hashes configured for series', seriesId);
+            console.debug('[Proxer Skip] [IFRAME] No frame hashes configured for series', seriesId);
             return;
         }
 
@@ -565,7 +548,7 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
 
         let debounceUntilMs = 0;
         let consecutiveCaptureFailures = 0;
-        console.log('[Proxer Skip] [IFRAME] Starting frame hash matching with profile:', {
+        console.debug('[Proxer Skip] [IFRAME] Starting frame hash matching with profile:', {
             seriesId,
             threshold,
             skipDuration,
@@ -608,6 +591,8 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
 
             consecutiveCaptureFailures = 0;
             const currentHash = hashResult.value;
+
+            /// Debug log the current hash, performance intensive!
             // console.log('[Proxer Skip] [IFRAME] Captured current frame hash at', now, ':', currentHash);
 
             for (const hash of hashes) {
@@ -652,15 +637,13 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
     const data = await iLoadData();
     const episodes = data.episodes;
     const episodeData = episodes[episodeKey];
-    console.log('[Proxer Skip] [IFRAME] Episode data available:', Boolean(episodeData));
+    console.debug('[Proxer Skip] [IFRAME] Episode data available:', Boolean(episodeData));
+
+    if (window.location.hostname === 'stream.proxer.me') {
+        const blueStreamId = iGetBlueStreamIdFromUrlParam();
+        console.debug('[Proxer Skip] [IFRAME] Blue stream ID from URL parameter:', blueStreamId);
+    }
 
     iInjectFrameHashButton(video, seriesId);
     iStartFrameHashMatching(video, seriesId);
-
-    if (!episodeData) {
-        console.log('[Proxer Skip] [IFRAME] No data for episode; Set Skip Time button is hidden');
-        // iAddSkipButton(video, episodeKey);
-    } else {
-        console.log('[Proxer Skip] [IFRAME] Data exists, skipping button');
-    }
 })();

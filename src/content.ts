@@ -16,7 +16,46 @@ function getEpisodeKey() {
     return null;
 }
 
-function syncBlueIframeEpisodeKey(episodeKey: string) {
+type SyncState = {
+    blueStreamCode: string | null;
+};
+
+/** Reads inline page scripts and extracts code for stream type ps-test (blue mirror). */
+function getBlueStreamCodeFromInlineScripts(): string | null {
+    const scripts = document.querySelectorAll('script:not([src])');
+
+    for (let i = 0; i < scripts.length; i += 1) {
+        const text = scripts[i].textContent || '';
+        if (!text.includes('var streams') || !text.includes('ps-test')) {
+            continue;
+        }
+
+        // Template format observed on host page:
+        // var streams = [{...},{...}];
+        const streamsLiteralMatch = text.match(/var\s+streams\s*=\s*(\[[\s\S]*?\]);/);
+        if (!streamsLiteralMatch || !streamsLiteralMatch[1]) {
+            continue;
+        }
+
+        try {
+            const parsed = JSON.parse(streamsLiteralMatch[1]) as Array<{ type?: string; code?: string }>;
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+                continue;
+            }
+
+            const blue = parsed.find((stream) => stream && stream.type === 'ps-test' && typeof stream.code === 'string' && stream.code.length > 0);
+            if (blue && blue.code) {
+                return blue.code;
+            }
+        } catch (_error) {
+            // If parsing fails for one script block, continue trying others.
+        }
+    }
+
+    return null;
+}
+
+function syncStreamIframeParams(episodeKey: string, state: SyncState) {
     const container = document.querySelector('.wStream');
     if (!container) {
         return;
@@ -34,23 +73,47 @@ function syncBlueIframeEpisodeKey(episodeKey: string) {
 
     try {
         const iframeUrl = new URL(src, window.location.href);
-        if (iframeUrl.hostname !== 'stream-service.proxer.me' || !iframeUrl.pathname.startsWith('/embed-')) {
+        const isSupportedHost = iframeUrl.hostname === 'stream-service.proxer.me' || iframeUrl.hostname === 'stream.proxer.me';
+        if (!isSupportedHost || !iframeUrl.pathname.startsWith('/embed-')) {
             return;
         }
 
-        if (iframeUrl.searchParams.get('ep') === episodeKey) {
+        if (!state.blueStreamCode) {
+            const codeFromScripts = getBlueStreamCodeFromInlineScripts();
+            if (codeFromScripts) {
+                state.blueStreamCode = codeFromScripts;
+                console.log('[Proxer Skip] Captured blue stream code from inline scripts:', codeFromScripts);
+            }
+        }
+
+        let changed = false;
+
+        if (iframeUrl.searchParams.get('ep') !== episodeKey) {
+            iframeUrl.searchParams.set('ep', episodeKey);
+            changed = true;
+        }
+
+        if (iframeUrl.hostname === 'stream.proxer.me' && state.blueStreamCode && iframeUrl.searchParams.get('bsid') !== state.blueStreamCode) {
+            iframeUrl.searchParams.set('bsid', state.blueStreamCode);
+            changed = true;
+        }
+
+        if (!changed) {
             return;
         }
 
-        iframeUrl.searchParams.set('ep', episodeKey);
         iframe.src = iframeUrl.toString();
-        console.log('[Proxer Skip] Synced blue iframe ep key:', episodeKey);
+        console.log('[Proxer Skip] Synced iframe params:', {
+            episodeKey,
+            blueStreamCode: state.blueStreamCode,
+            host: iframeUrl.hostname
+        });
     } catch (error) {
-        console.warn('[Proxer Skip] Failed to sync blue iframe ep key:', error);
+        console.warn('[Proxer Skip] Failed to sync iframe params:', error);
     }
 }
 
-function observeWStreamIframe(episodeKey: string) {
+function observeWStreamIframe(episodeKey: string, state: SyncState) {
     const tryAttach = (attempt: number) => {
         const container = document.querySelector('.wStream');
         if (!container) {
@@ -62,19 +125,19 @@ function observeWStreamIframe(episodeKey: string) {
             return;
         }
 
-        syncBlueIframeEpisodeKey(episodeKey);
+        syncStreamIframeParams(episodeKey, state);
 
         const observer = new MutationObserver((mutations) => {
             for (let i = 0; i < mutations.length; i += 1) {
                 const mutation = mutations[i];
 
                 if (mutation.type === 'attributes' && mutation.attributeName === 'src' && mutation.target instanceof HTMLIFrameElement) {
-                    syncBlueIframeEpisodeKey(episodeKey);
+                    syncStreamIframeParams(episodeKey, state);
                     return;
                 }
 
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                    syncBlueIframeEpisodeKey(episodeKey);
+                    syncStreamIframeParams(episodeKey, state);
                     return;
                 }
             }
@@ -99,7 +162,12 @@ function observeWStreamIframe(episodeKey: string) {
         return;
     }
 
-    observeWStreamIframe(episodeKey);
+    const state: SyncState = { blueStreamCode: null };
+    state.blueStreamCode = getBlueStreamCodeFromInlineScripts();
+    if (state.blueStreamCode) {
+        console.log('[Proxer Skip] Initial blue stream code from inline scripts:', state.blueStreamCode);
+    }
+    observeWStreamIframe(episodeKey, state);
 
     // 2 seconds after load, auto-select the Proxer-Stream mirror if present and not active.
     setTimeout(async () => {
