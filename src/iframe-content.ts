@@ -12,6 +12,15 @@ const MAX_CONSECUTIVE_CAPTURE_FAILURES = 30;
 const GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
 let iActiveVolumeFadeRaf: number | null = null;
 
+/** Tracks fade animation state to support pause/resume and buffering. */
+interface IFadeState {
+    fadeStart: number | null;
+    pausedAt: number | null; // timestamp when fade was paused
+    bufferedAt: number | null; // timestamp when buffering started
+    targetVolume: number;
+}
+let iFadeState: IFadeState | null = null;
+
 /** Clamps any input volume to the valid HTMLMediaElement range. */
 function iClampVolume(volume: number): number {
     if (!Number.isFinite(volume)) {
@@ -29,7 +38,8 @@ function iClampVolume(volume: number): number {
     return volume;
 }
 
-/** Seeks the video and smooths post-seek audio by fading from 0 to the prior level over 500 ms. */
+/** Seeks the video and smooths post-seek audio by fading from 0 to the prior level over 500 ms.
+ * If the video is paused during fade, the fade pauses and resumes when playback resumes. */
 function iSeekWithAudioFade(video: HTMLVideoElement, targetTime: number): void {
     const targetVolume = iClampVolume(video.volume);
     if (video.muted || targetVolume <= 0) {
@@ -45,26 +55,73 @@ function iSeekWithAudioFade(video: HTMLVideoElement, targetTime: number): void {
     video.volume = 0;
     video.currentTime = targetTime;
 
-    let fadeStart: number | null = null;
+    iFadeState = {
+        fadeStart: null,
+        pausedAt: null,
+        bufferedAt: null,
+        targetVolume
+    };
+
     const tick = (now: number) => {
-        if (fadeStart === null) {
-            fadeStart = now;
+        if (!iFadeState) return;
+
+        if (iFadeState.fadeStart === null) {
+            iFadeState.fadeStart = now;
         }
 
-        const elapsed = now - fadeStart;
+        // If video is paused, pause the fade
+        if (video.paused) {
+            if (iFadeState.pausedAt === null) {
+                iFadeState.pausedAt = now;
+            }
+            iActiveVolumeFadeRaf = requestAnimationFrame(tick);
+            return;
+        }
+
+        // If video is buffering, pause the fade
+        if (iFadeState.bufferedAt !== null) {
+            iActiveVolumeFadeRaf = requestAnimationFrame(tick);
+            return;
+        }
+
+        // If video resumed from pause, adjust fadeStart to account for pause duration
+        if (iFadeState.pausedAt !== null) {
+            iFadeState.fadeStart! += now - iFadeState.pausedAt;
+            iFadeState.pausedAt = null;
+        }
+
+        const elapsed = now - iFadeState.fadeStart;
         const rawProgress = elapsed / AUDIO_FADE_DURATION_MS;
         const progress = Math.max(0, Math.min(1, rawProgress));
         if (progress >= 1) {
-            video.volume = iClampVolume(targetVolume);
+            video.volume = iClampVolume(iFadeState.targetVolume);
+            iFadeState = null;
             iActiveVolumeFadeRaf = null;
             return;
         }
 
-        video.volume = iClampVolume(targetVolume * progress);
+        video.volume = iClampVolume(iFadeState.targetVolume * progress);
         iActiveVolumeFadeRaf = requestAnimationFrame(tick);
     };
 
     iActiveVolumeFadeRaf = requestAnimationFrame(tick);
+}
+
+/** Sets up event listeners for buffering state changes. */
+function iSetupVideoBufferingListeners(video: HTMLVideoElement): void {
+    video.addEventListener('waiting', () => {
+        if (iFadeState) {
+            iFadeState.bufferedAt = performance.now();
+        }
+    });
+
+    video.addEventListener('playing', () => {
+        if (iFadeState && iFadeState.bufferedAt !== null) {
+            // Adjust fadeStart to account for buffering time
+            iFadeState.fadeStart! += performance.now() - iFadeState.bufferedAt;
+            iFadeState.bufferedAt = null;
+        }
+    });
 }
 
 /** Returns true when the iframe host is one of the supported stream players. */
@@ -171,13 +228,10 @@ function iGetEpisodeKey() {
     }
     console.debug('[Proxer Skip] [IFRAME] Unable to parse episode key from ref');
 
-    if (window.location.search.includes('&ep=')) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const ep = urlParams.get('ep');
-        if (ep) {
-            console.debug('[Proxer Skip] [IFRAME] Episode key from URL parameter:', ep);
-            return ep;
-        }
+    const ep = urlParams.get('ep');
+    if (ep) {
+        console.debug('[Proxer Skip] [IFRAME] Episode key from URL parameter:', ep);
+        return ep;
     }
     return null;
 }
@@ -644,6 +698,7 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
         console.debug('[Proxer Skip] [IFRAME] Blue stream ID from URL parameter:', blueStreamId);
     }
 
+    iSetupVideoBufferingListeners(video);
     iInjectFrameHashButton(video, seriesId);
     iStartFrameHashMatching(video, seriesId);
 })();
