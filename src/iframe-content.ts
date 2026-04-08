@@ -554,6 +554,10 @@ function iInjectFrameHashButton(video: HTMLVideoElement, seriesId: string): void
                     { hash: hashResult.value, thumbnail: thumbResult.value }
                 ]);
                 console.log('[Proxer Skip] [IFRAME] Saved frame hash list for series', seriesId, profile);
+                const skipTarget = Number.isFinite(video.duration)
+                    ? Math.min(video.currentTime + DEFAULT_SKIP_DURATION, video.duration)
+                    : video.currentTime + DEFAULT_SKIP_DURATION;
+                iSeekWithAudioFade(video, skipTarget);
                 iShowSaveToast(video, `Saved skipframe (${profile.frameHashes.length} total)`);
             } catch (error) {
                 console.error('[Proxer Skip] [IFRAME] Failed to save frame hashes:', error);
