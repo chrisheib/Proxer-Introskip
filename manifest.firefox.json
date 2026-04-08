@@ -41,6 +41,7 @@
         "gecko": {
             "id": "proxer-anime-skip@stschiff.dev",
             "strict_min_version": "140.0",
+            "update_url": "https://extensions.stschiff.de/firefox/proxer-skip/addons.json",
             "data_collection_permissions": {
                 "required": [
                     "websiteContent"

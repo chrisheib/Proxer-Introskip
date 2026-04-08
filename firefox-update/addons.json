@@ -1,0 +1,12 @@
+{
+    "addons": {
+        "proxer-anime-skip@stschiff.dev": {
+            "updates": [
+                {
+                    "version": "1.2",
+                    "update_link": "https://extensions.stschiff.de/firefox/proxer-skip/proxer-anime-skip-1.2.xpi"
+                }
+            ]
+        }
+    }
+}

@@ -1,3 +1,4 @@
 plan/
 dist/
 release/
+*.xpi
