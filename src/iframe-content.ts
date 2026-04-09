@@ -4,12 +4,14 @@ type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
 const FRAME_HASH_BUTTON_CLASS = 'proxer-save-framehash-btn';
 const DEFAULT_SKIP_DURATION = 85;
-const DEFAULT_MATCH_THRESHOLD = 10;
+const DEFAULT_MATCH_THRESHOLD = 5;
 const DEFAULT_SCAN_INTERVAL_MS = 1000 / 30; // 30 FPS
 const DEFAULT_MATCH_DEBOUNCE_MS = 3000;
 const AUDIO_FADE_DURATION_MS = 500;
 const MAX_CONSECUTIVE_CAPTURE_FAILURES = 30;
-const GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
+const I_GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
+const I_AUTO_NEXT_SIGNAL_KEY = 'autoNextEpisodeSignal';
+const I_AUTO_NEXT_SIGNAL_TTL_MS = 15000;
 let iActiveVolumeFadeRaf: number | null = null;
 
 /** Tracks fade animation state to support pause/resume and buffering. */
@@ -448,8 +450,8 @@ async function iSaveSeriesFrameHashes(seriesId: string, markers: Array<{ hash: s
 
 /** Loads global skipframe matching settings used across all series. */
 async function iGetGlobalSkipframeSettings() {
-    const data = await chrome.storage.local.get([GLOBAL_SKIPFRAME_SETTINGS_KEY]);
-    const raw = data[GLOBAL_SKIPFRAME_SETTINGS_KEY] || {};
+    const data = await chrome.storage.local.get([I_GLOBAL_SKIPFRAME_SETTINGS_KEY]);
+    const raw = data[I_GLOBAL_SKIPFRAME_SETTINGS_KEY] || {};
 
     const threshold = Number.isFinite(raw.threshold) && raw.threshold >= 0
         ? raw.threshold
@@ -463,13 +465,48 @@ async function iGetGlobalSkipframeSettings() {
     const soundFade = typeof raw.soundFade === 'boolean'
         ? raw.soundFade
         : true;
+    const autoNextEpisode = typeof raw.autoNextEpisode === 'boolean'
+        ? raw.autoNextEpisode
+        : true;
 
     return {
         threshold,
         skipDuration,
         refreshMs,
-        soundFade
+        soundFade,
+        autoNextEpisode
     };
+}
+
+/** Publishes a short-lived completion signal consumed by host content script for auto-next. */
+async function iPublishAutoNextSignal(episodeKey: string): Promise<void> {
+    await chrome.storage.local.set({
+        [I_AUTO_NEXT_SIGNAL_KEY]: {
+            episodeKey,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + I_AUTO_NEXT_SIGNAL_TTL_MS
+        }
+    });
+}
+
+/** On playback completion, conditionally publishes a storage signal for host auto-next. */
+function iSetupEpisodeCompletionSignal(video: HTMLVideoElement, episodeKey: string): void {
+    let completionSignaled = false;
+    video.addEventListener('ended', async () => {
+        if (completionSignaled) {
+            return;
+        }
+
+        completionSignaled = true;
+        const settings = await iGetGlobalSkipframeSettings();
+        if (!settings.autoNextEpisode) {
+            console.debug('[Proxer Skip] [IFRAME] Auto-next episode disabled; skipping completion flag');
+            return;
+        }
+
+        console.debug('[Proxer Skip] [IFRAME] Episode ended; publishing auto-next signal');
+        await iPublishAutoNextSignal(episodeKey);
+    });
 }
 
 /** Shows a short-lived toast at the old top-right Set Skip Time button position. */
@@ -703,6 +740,7 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
     }
 
     iSetupVideoBufferingListeners(video);
+    iSetupEpisodeCompletionSignal(video, episodeKey);
     iInjectFrameHashButton(video, seriesId);
     iStartFrameHashMatching(video, seriesId);
 })();

@@ -18,7 +18,79 @@ function getEpisodeKey() {
 
 type SyncState = {
     blueStreamCode: string | null;
+    hasTriggeredAutoNext: boolean;
 };
+
+const C_GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
+const C_AUTO_NEXT_SIGNAL_KEY = 'autoNextEpisodeSignal';
+const C_AUTO_NEXT_SIGNAL_TTL_MS = 15000;
+
+type AutoNextSignal = {
+    episodeKey?: string;
+    createdAt?: number;
+    expiresAt?: number;
+};
+
+/** Reads auto-next setting from global skipframe settings; defaults to enabled. */
+async function isAutoNextEpisodeEnabled(): Promise<boolean> {
+    const data = await chrome.storage.local.get([C_GLOBAL_SKIPFRAME_SETTINGS_KEY]);
+    const raw = data[C_GLOBAL_SKIPFRAME_SETTINGS_KEY] || {};
+    return typeof raw.autoNextEpisode === 'boolean' ? raw.autoNextEpisode : true;
+}
+
+/** Finds the episode navigation link matching the visible "Nächste >" label. */
+function getNextEpisodeLink(): HTMLAnchorElement | null {
+    const links = document.querySelectorAll('a');
+    for (let i = 0; i < links.length; i += 1) {
+        const link = links[i] as HTMLAnchorElement;
+        const text = (link.textContent || '').trim();
+        if (text === 'Nächste >') {
+            return link;
+        }
+    }
+
+    return null;
+}
+
+/** Consumes a short-lived iframe completion signal and opens next episode when available. */
+async function maybeFollowNextEpisodeFromStorageSignal(episodeKey: string, state: SyncState): Promise<void> {
+    if (state.hasTriggeredAutoNext) {
+        return;
+    }
+
+    const data = await chrome.storage.local.get([C_AUTO_NEXT_SIGNAL_KEY]);
+    const signal = (data[C_AUTO_NEXT_SIGNAL_KEY] || {}) as AutoNextSignal;
+    if (signal.episodeKey !== episodeKey) {
+        return;
+    }
+
+    if (!Number.isFinite(signal.createdAt) || !Number.isFinite(signal.expiresAt)) {
+        await chrome.storage.local.remove(C_AUTO_NEXT_SIGNAL_KEY);
+        return;
+    }
+
+    if (Date.now() > Number(signal.expiresAt) || Date.now() - Number(signal.createdAt) > C_AUTO_NEXT_SIGNAL_TTL_MS) {
+        await chrome.storage.local.remove(C_AUTO_NEXT_SIGNAL_KEY);
+        return;
+    }
+
+    const autoNextEnabled = await isAutoNextEpisodeEnabled();
+    if (!autoNextEnabled) {
+        console.log('[Proxer Skip] Auto-next disabled; ignoring completion signal');
+        return;
+    }
+
+    const nextLink = getNextEpisodeLink();
+    if (!nextLink) {
+        console.log('[Proxer Skip] Completion signal found, but no next-episode link available');
+        return;
+    }
+
+    await chrome.storage.local.remove(C_AUTO_NEXT_SIGNAL_KEY);
+    state.hasTriggeredAutoNext = true;
+    console.log('[Proxer Skip] Completion signal found; opening next episode:', nextLink.href);
+    nextLink.click();
+}
 
 /** Reads inline page scripts and extracts code for stream type ps-test (blue mirror). */
 function getBlueStreamCodeFromInlineScripts(): string | null {
@@ -55,7 +127,7 @@ function getBlueStreamCodeFromInlineScripts(): string | null {
     return null;
 }
 
-function syncStreamIframeParams(episodeKey: string, state: SyncState) {
+async function syncStreamIframeParams(episodeKey: string, state: SyncState) {
     const container = document.querySelector('.wStream');
     if (!container) {
         return;
@@ -113,6 +185,42 @@ function syncStreamIframeParams(episodeKey: string, state: SyncState) {
     }
 }
 
+/** Watches the short-lived completion signal so auto-next works even without iframe src mutations. */
+function observeAutoNextSignal(episodeKey: string, state: SyncState): void {
+    const checkSignal = () => {
+        void maybeFollowNextEpisodeFromStorageSignal(episodeKey, state);
+    };
+
+    checkSignal();
+
+    const intervalId = setInterval(() => {
+        if (state.hasTriggeredAutoNext) {
+            clearInterval(intervalId);
+            return;
+        }
+
+        checkSignal();
+    }, 1000);
+
+    const onStorageChange = (changes: { [key: string]: any }, areaName: string) => {
+        if (areaName !== 'local') {
+            return;
+        }
+
+        if (!changes[C_AUTO_NEXT_SIGNAL_KEY]) {
+            return;
+        }
+
+        checkSignal();
+    };
+
+    chrome.storage.onChanged.addListener(onStorageChange);
+    window.addEventListener('beforeunload', () => {
+        clearInterval(intervalId);
+        chrome.storage.onChanged.removeListener(onStorageChange);
+    });
+}
+
 function observeWStreamIframe(episodeKey: string, state: SyncState) {
     const tryAttach = (attempt: number) => {
         const container = document.querySelector('.wStream');
@@ -125,19 +233,19 @@ function observeWStreamIframe(episodeKey: string, state: SyncState) {
             return;
         }
 
-        syncStreamIframeParams(episodeKey, state);
+        void syncStreamIframeParams(episodeKey, state);
 
         const observer = new MutationObserver((mutations) => {
             for (let i = 0; i < mutations.length; i += 1) {
                 const mutation = mutations[i];
 
                 if (mutation.type === 'attributes' && mutation.attributeName === 'src' && mutation.target instanceof HTMLIFrameElement) {
-                    syncStreamIframeParams(episodeKey, state);
+                    void syncStreamIframeParams(episodeKey, state);
                     return;
                 }
 
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                    syncStreamIframeParams(episodeKey, state);
+                    void syncStreamIframeParams(episodeKey, state);
                     return;
                 }
             }
@@ -162,12 +270,13 @@ function observeWStreamIframe(episodeKey: string, state: SyncState) {
         return;
     }
 
-    const state: SyncState = { blueStreamCode: null };
+    const state: SyncState = { blueStreamCode: null, hasTriggeredAutoNext: false };
     state.blueStreamCode = getBlueStreamCodeFromInlineScripts();
     if (state.blueStreamCode) {
         console.log('[Proxer Skip] Initial blue stream code from inline scripts:', state.blueStreamCode);
     }
     observeWStreamIframe(episodeKey, state);
+    observeAutoNextSignal(episodeKey, state);
 
     // 2 seconds after load, auto-select the Proxer-Stream mirror if present and not active.
     setTimeout(async () => {

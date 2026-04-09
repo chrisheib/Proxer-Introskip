@@ -25,6 +25,10 @@ tbd
 ### 2026-03-31 - Global sound fade option
 Fügt eine globale Einstellung hinzu, um nach dem Skippen einen Audio-Fade einzuschalten, um nicht das Trommelfell zu verlieren.
 
+### 2026-04-08 - Auto-next episode on completion
+Fügt eine globale Einstellung hinzu (standardmäßig aktiv), die beim Episodenende automatisch zur nächsten Episode wechselt.
+Die Iframe-Player signalisieren das Ende per Query-Parameter, den das Host-Skript auswertet.
+
 ## Entwicklung
 
 ### Build

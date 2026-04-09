@@ -31,6 +31,7 @@ type GlobalSkipframeSettings = {
     skipDuration: number;
     refreshMs: number;
     soundFade: boolean;
+    autoNextEpisode: boolean;
 };
 
 const POPUP_GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
@@ -38,6 +39,7 @@ const POPUP_DEFAULT_MATCH_THRESHOLD = 10;
 const POPUP_DEFAULT_SKIP_DURATION = 85;
 const POPUP_DEFAULT_REFRESH_MS = 1000 / 30;
 const POPUP_DEFAULT_SOUND_FADE = true;
+const POPUP_DEFAULT_AUTO_NEXT_EPISODE = true;
 
 function parseSeriesIdFromPath(pathname: string) {
     const match = pathname.match(/^\/watch\/([^/]+)/);
@@ -64,12 +66,16 @@ async function getGlobalSkipframeSettings(): Promise<GlobalSkipframeSettings> {
     const soundFade = typeof raw.soundFade === 'boolean'
         ? raw.soundFade
         : POPUP_DEFAULT_SOUND_FADE;
+    const autoNextEpisode = typeof raw.autoNextEpisode === 'boolean'
+        ? raw.autoNextEpisode
+        : POPUP_DEFAULT_AUTO_NEXT_EPISODE;
 
     return {
         threshold,
         skipDuration,
         refreshMs,
-        soundFade
+        soundFade,
+        autoNextEpisode
     };
 }
 
@@ -84,7 +90,8 @@ async function initGlobalSkipframeSettingsInputs() {
     const durationInput = document.getElementById('global-duration-input') as HTMLInputElement | null;
     const refreshInput = document.getElementById('global-refresh-input') as HTMLInputElement | null;
     const soundFadeToggle = document.getElementById('global-sound-fade-toggle') as HTMLInputElement | null;
-    if (!thresholdInput || !durationInput || !refreshInput || !soundFadeToggle) {
+    const autoNextToggle = document.getElementById('global-auto-next-toggle') as HTMLInputElement | null;
+    if (!thresholdInput || !durationInput || !refreshInput || !soundFadeToggle || !autoNextToggle) {
         return;
     }
 
@@ -93,6 +100,7 @@ async function initGlobalSkipframeSettingsInputs() {
     durationInput.value = String(settings.skipDuration);
     refreshInput.value = String(Math.round(settings.refreshMs));
     soundFadeToggle.checked = settings.soundFade;
+    autoNextToggle.checked = settings.autoNextEpisode;
 
     const persistSettings = async () => {
         const threshold = Math.max(0, Number.parseInt(thresholdInput.value, 10) || POPUP_DEFAULT_MATCH_THRESHOLD);
@@ -107,7 +115,8 @@ async function initGlobalSkipframeSettingsInputs() {
             threshold,
             skipDuration,
             refreshMs,
-            soundFade: soundFadeToggle.checked
+            soundFade: soundFadeToggle.checked,
+            autoNextEpisode: autoNextToggle.checked
         });
     };
 
@@ -115,6 +124,7 @@ async function initGlobalSkipframeSettingsInputs() {
     durationInput.addEventListener('change', persistSettings);
     refreshInput.addEventListener('change', persistSettings);
     soundFadeToggle.addEventListener('change', persistSettings);
+    autoNextToggle.addEventListener('change', persistSettings);
 }
 
 async function getActiveSeriesId() {
