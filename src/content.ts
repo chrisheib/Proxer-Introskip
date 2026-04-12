@@ -1,17 +1,30 @@
 
+/** Parses a watch-page pathname into the extension's episode key format. */
+function parseEpisodeKeyFromPathname(pathname: string): string | null {
+    const path = pathname.split('/');
+    if (path.length < 4 || path[1] !== 'watch') {
+        console.warn('[Proxer Skip] Unable to convert pathname to episode key:', pathname);
+        return null;
+    }
+
+    const seriesId = path[2];
+    const episodeNumber = path[3];
+    if (!seriesId || !episodeNumber) {
+        console.warn('[Proxer Skip] Missing series or episode when converting pathname:', pathname);
+        return null;
+    }
+
+    return `${seriesId}-${episodeNumber}`;
+}
+
 function getEpisodeKey() {
-    const path = window.location.pathname.split('/');
     console.log('[Proxer Skip] Current pathname:', window.location.pathname);
-    // URL: https://proxer.me/watch/75169/8/engsub#top
-    // Extract anime ID and episode number from URL path
-    // URL format: /watch/{id}/{episode}/...
-    if (path.length >= 4) {
-        const id = path[2];
-        const episode = path[3];
-        const key = `${id}-${episode}`;
+    const key = parseEpisodeKeyFromPathname(window.location.pathname);
+    if (key) {
         console.log('[Proxer Skip] Episode key:', key);
         return key;
     }
+
     console.log('[Proxer Skip] Unable to parse episode key from URL');
     return null;
 }
@@ -24,11 +37,23 @@ type SyncState = {
 const C_GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
 const C_AUTO_NEXT_SIGNAL_KEY = 'autoNextEpisodeSignal';
 const C_AUTO_NEXT_SIGNAL_TTL_MS = 15000;
+const C_PENDING_PLAYER_LAUNCH_KEY = 'pendingPlayerLaunch';
+const C_PENDING_PLAYER_LAUNCH_TTL_MS = 20000;
 
 type AutoNextSignal = {
     episodeKey?: string;
     createdAt?: number;
     expiresAt?: number;
+    autoStart?: boolean;
+    restoreFullscreen?: boolean;
+};
+
+type ContentPendingPlayerLaunch = {
+    episodeKey?: string;
+    createdAt?: number;
+    expiresAt?: number;
+    source?: 'auto-next';
+    shouldEnterFullscreen?: boolean;
 };
 
 /** Reads auto-next setting from global skipframe settings; defaults to enabled. */
@@ -52,6 +77,33 @@ function getNextEpisodeLink(): HTMLAnchorElement | null {
     return null;
 }
 
+/** Parses a watch-page URL into the extension's episode key format. */
+function parseEpisodeKeyFromWatchUrl(urlLike: string): string | null {
+    try {
+        const url = new URL(urlLike, window.location.href);
+        return parseEpisodeKeyFromPathname(url.pathname);
+    } catch (error) {
+        console.warn('[Proxer Skip] Unable to convert URL to episode key:', urlLike, error);
+        return null;
+    }
+}
+
+/** Stores a one-shot marker so the destination iframe can auto-start after auto-next. */
+async function setPendingPlayerLaunch(episodeKey: string, shouldEnterFullscreen: boolean): Promise<void> {
+    const now = Date.now();
+    const pendingLaunch: ContentPendingPlayerLaunch = {
+        episodeKey,
+        createdAt: now,
+        expiresAt: now + C_PENDING_PLAYER_LAUNCH_TTL_MS,
+        source: 'auto-next',
+        shouldEnterFullscreen
+    };
+
+    await chrome.storage.local.set({
+        [C_PENDING_PLAYER_LAUNCH_KEY]: pendingLaunch
+    });
+}
+
 /** Consumes a short-lived iframe completion signal and opens next episode when available. */
 async function maybeFollowNextEpisodeFromStorageSignal(episodeKey: string, state: SyncState): Promise<void> {
     if (state.hasTriggeredAutoNext) {
@@ -63,6 +115,8 @@ async function maybeFollowNextEpisodeFromStorageSignal(episodeKey: string, state
     if (signal.episodeKey !== episodeKey) {
         return;
     }
+
+    console.debug('[Proxer Skip] Auto-next signal payload for current episode:', signal);
 
     if (!Number.isFinite(signal.createdAt) || !Number.isFinite(signal.expiresAt)) {
         await chrome.storage.local.remove(C_AUTO_NEXT_SIGNAL_KEY);
@@ -84,6 +138,19 @@ async function maybeFollowNextEpisodeFromStorageSignal(episodeKey: string, state
     if (!nextLink) {
         console.log('[Proxer Skip] Completion signal found, but no next-episode link available');
         return;
+    }
+
+    const shouldAutoStart = signal.autoStart === true;
+    if (shouldAutoStart) {
+        const nextEpisodeKey = parseEpisodeKeyFromWatchUrl(nextLink.href);
+        if (nextEpisodeKey) {
+            await setPendingPlayerLaunch(nextEpisodeKey, signal.restoreFullscreen === true);
+            console.log('[Proxer Skip] Stored pending player launch marker for', nextEpisodeKey);
+        } else {
+            console.log('[Proxer Skip] Could not derive next episode key for pending player launch');
+        }
+    } else {
+        console.debug('[Proxer Skip] Auto-next signal does not request autostart for next episode');
     }
 
     await chrome.storage.local.remove(C_AUTO_NEXT_SIGNAL_KEY);

@@ -32,6 +32,7 @@ type GlobalSkipframeSettings = {
     refreshMs: number;
     soundFade: boolean;
     autoNextEpisode: boolean;
+    autoStartFullscreenAfterAutoNext: boolean;
 };
 
 const POPUP_GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
@@ -40,6 +41,7 @@ const POPUP_DEFAULT_SKIP_DURATION = 85;
 const POPUP_DEFAULT_REFRESH_MS = 1000 / 30;
 const POPUP_DEFAULT_SOUND_FADE = true;
 const POPUP_DEFAULT_AUTO_NEXT_EPISODE = true;
+const POPUP_DEFAULT_AUTO_START_FULLSCREEN_AFTER_AUTO_NEXT = false;
 
 function parseSeriesIdFromPath(pathname: string) {
     const match = pathname.match(/^\/watch\/([^/]+)/);
@@ -69,13 +71,17 @@ async function getGlobalSkipframeSettings(): Promise<GlobalSkipframeSettings> {
     const autoNextEpisode = typeof raw.autoNextEpisode === 'boolean'
         ? raw.autoNextEpisode
         : POPUP_DEFAULT_AUTO_NEXT_EPISODE;
+    const autoStartFullscreenAfterAutoNext = typeof raw.autoStartFullscreenAfterAutoNext === 'boolean'
+        ? raw.autoStartFullscreenAfterAutoNext
+        : POPUP_DEFAULT_AUTO_START_FULLSCREEN_AFTER_AUTO_NEXT;
 
     return {
         threshold,
         skipDuration,
         refreshMs,
         soundFade,
-        autoNextEpisode
+        autoNextEpisode,
+        autoStartFullscreenAfterAutoNext
     };
 }
 
@@ -91,7 +97,8 @@ async function initGlobalSkipframeSettingsInputs() {
     const refreshInput = document.getElementById('global-refresh-input') as HTMLInputElement | null;
     const soundFadeToggle = document.getElementById('global-sound-fade-toggle') as HTMLInputElement | null;
     const autoNextToggle = document.getElementById('global-auto-next-toggle') as HTMLInputElement | null;
-    if (!thresholdInput || !durationInput || !refreshInput || !soundFadeToggle || !autoNextToggle) {
+    const autoStartFullscreenToggle = document.getElementById('global-auto-start-fullscreen-toggle') as HTMLInputElement | null;
+    if (!thresholdInput || !durationInput || !refreshInput || !soundFadeToggle || !autoNextToggle || !autoStartFullscreenToggle) {
         return;
     }
 
@@ -101,6 +108,7 @@ async function initGlobalSkipframeSettingsInputs() {
     refreshInput.value = String(Math.round(settings.refreshMs));
     soundFadeToggle.checked = settings.soundFade;
     autoNextToggle.checked = settings.autoNextEpisode;
+    autoStartFullscreenToggle.checked = settings.autoStartFullscreenAfterAutoNext;
 
     const persistSettings = async () => {
         const threshold = Math.max(0, Number.parseInt(thresholdInput.value, 10) || POPUP_DEFAULT_MATCH_THRESHOLD);
@@ -116,7 +124,8 @@ async function initGlobalSkipframeSettingsInputs() {
             skipDuration,
             refreshMs,
             soundFade: soundFadeToggle.checked,
-            autoNextEpisode: autoNextToggle.checked
+            autoNextEpisode: autoNextToggle.checked,
+            autoStartFullscreenAfterAutoNext: autoStartFullscreenToggle.checked
         });
     };
 
@@ -125,6 +134,7 @@ async function initGlobalSkipframeSettingsInputs() {
     refreshInput.addEventListener('change', persistSettings);
     soundFadeToggle.addEventListener('change', persistSettings);
     autoNextToggle.addEventListener('change', persistSettings);
+    autoStartFullscreenToggle.addEventListener('change', persistSettings);
 }
 
 async function getActiveSeriesId() {

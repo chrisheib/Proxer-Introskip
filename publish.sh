@@ -8,6 +8,7 @@ REMOTE_UPDATE_DIR="${REMOTE_UPDATE_DIR:-~/docker/sites/extensions.stschiff.de/fi
 REMOTE_TMP_DIR="${REMOTE_TMP_DIR:-/tmp/proxer-skip-upload}"
 BASE_UPDATE_URL="${BASE_UPDATE_URL:-https://extensions.stschiff.de/firefox/proxer-skip}"
 REMOTE_XPI_PREFIX="${REMOTE_XPI_PREFIX:-proxer-anime-skip}"
+REMOTE_LATEST_XPI_NAME="${REMOTE_LATEST_XPI_NAME:-$REMOTE_XPI_PREFIX-latest.xpi}"
 
 if [ ! -f "$LOCAL_JSON" ]; then
   echo "Error: local file not found: $LOCAL_JSON" >&2
@@ -35,6 +36,7 @@ fi
 local_xpi_path="$LOCAL_XPI_DIR/$latest_xpi_file"
 remote_xpi_name="$REMOTE_XPI_PREFIX-$latest_version.xpi"
 remote_xpi_url="$BASE_UPDATE_URL/$remote_xpi_name"
+remote_latest_xpi_url="$BASE_UPDATE_URL/$REMOTE_LATEST_XPI_NAME"
 
 escaped_version="$(printf '%s' "$latest_version" | sed 's/[&|]/\\&/g')"
 escaped_update_url="$(printf '%s' "$remote_xpi_url" | sed 's/[&|]/\\&/g')"
@@ -51,10 +53,12 @@ cp "$tmp_json" "$LOCAL_JSON"
 
 echo "Publishing $LOCAL_JSON to $REMOTE_HOST:$REMOTE_UPDATE_DIR/addons.json"
 echo "Publishing latest XPI $local_xpi_path as $REMOTE_HOST:$REMOTE_UPDATE_DIR/$remote_xpi_name"
+echo "Publishing stable latest XPI link as $REMOTE_HOST:$REMOTE_UPDATE_DIR/$REMOTE_LATEST_XPI_NAME"
+echo "Latest XPI URL: $remote_latest_xpi_url"
 ssh "$REMOTE_HOST" "mkdir -p $REMOTE_TMP_DIR"
 scp "$LOCAL_JSON" "$REMOTE_HOST:$REMOTE_TMP_DIR/addons.json"
 scp "$local_xpi_path" "$REMOTE_HOST:$REMOTE_TMP_DIR/$remote_xpi_name"
-ssh "$REMOTE_HOST" "sudo mkdir -p $REMOTE_UPDATE_DIR && sudo install -m 0644 $REMOTE_TMP_DIR/addons.json $REMOTE_UPDATE_DIR/addons.json && sudo install -m 0644 $REMOTE_TMP_DIR/$remote_xpi_name $REMOTE_UPDATE_DIR/$remote_xpi_name"
+ssh "$REMOTE_HOST" "sudo mkdir -p $REMOTE_UPDATE_DIR && sudo install -m 0644 $REMOTE_TMP_DIR/addons.json $REMOTE_UPDATE_DIR/addons.json && sudo install -m 0644 $REMOTE_TMP_DIR/$remote_xpi_name $REMOTE_UPDATE_DIR/$remote_xpi_name && sudo install -m 0644 $REMOTE_TMP_DIR/$remote_xpi_name $REMOTE_UPDATE_DIR/$REMOTE_LATEST_XPI_NAME"
 ssh "$REMOTE_HOST" "rm -f $REMOTE_TMP_DIR/addons.json $REMOTE_TMP_DIR/$remote_xpi_name"
 
 echo "Done."

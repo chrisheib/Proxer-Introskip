@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Proxer Skip",
-    "version": "1.3",
+    "version": "1.4",
     "description": "Überspringe automatisch Intros, Openings und Endings auf proxer.me",
     "permissions": [
         "activeTab",

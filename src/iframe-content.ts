@@ -2,6 +2,8 @@
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
+type IPlayerType = 'RED' | 'BLUE' | 'UNKNOWN';
+
 const FRAME_HASH_BUTTON_CLASS = 'proxer-save-framehash-btn';
 const DEFAULT_SKIP_DURATION = 85;
 const DEFAULT_MATCH_THRESHOLD = 5;
@@ -12,7 +14,26 @@ const MAX_CONSECUTIVE_CAPTURE_FAILURES = 30;
 const I_GLOBAL_SKIPFRAME_SETTINGS_KEY = 'globalSkipframeSettings';
 const I_AUTO_NEXT_SIGNAL_KEY = 'autoNextEpisodeSignal';
 const I_AUTO_NEXT_SIGNAL_TTL_MS = 15000;
+const I_PENDING_PLAYER_LAUNCH_KEY = 'pendingPlayerLaunch';
+const I_PENDING_PLAYER_LAUNCH_TTL_MS = 20000;
+const I_BLUE_PLAYER_LAUNCH_DELAY_MS = 2750;
 let iActiveVolumeFadeRaf: number | null = null;
+
+type IframePendingPlayerLaunch = {
+    episodeKey?: string;
+    createdAt?: number;
+    expiresAt?: number;
+    source?: 'auto-next';
+    shouldEnterFullscreen?: boolean;
+};
+
+type IframeAutoNextSignal = {
+    episodeKey?: string;
+    createdAt?: number;
+    expiresAt?: number;
+    autoStart?: boolean;
+    restoreFullscreen?: boolean;
+};
 
 /** Tracks fade animation state to support pause/resume and buffering. */
 interface IFadeState {
@@ -128,7 +149,24 @@ function iSetupVideoBufferingListeners(video: HTMLVideoElement): void {
 
 /** Returns true when the iframe host is one of the supported stream players. */
 function iIsSupportedIframeHost(): boolean {
-    return window.location.hostname === 'stream.proxer.me' || window.location.hostname === 'stream-service.proxer.me';
+    return iGetPlayerType() !== 'UNKNOWN';
+}
+
+/** Resolves logical player type from the current iframe host. */
+function iGetPlayerType(): IPlayerType {
+
+    // Blue player: https://stream-service.proxer.me/embed-mbv29gyy9tsx.html?mode=unblock&ep=76685-10
+    // Red player: https://stream.proxer.me/embed-cm9X3xuUdJVa-728x504.html?title=Yuusha+Party+ni+Kawaii+Ko+ga+Ita+node%2C+Kokuhaku+shitemita.+Episode+10+EngSub&ref=%2Fwatch%2F76685%2F10%2Fengsub&ep=76685-10&bsid=mbv29gyy9tsx
+
+    if (window.location.hostname === 'stream.proxer.me') {
+        return 'RED';
+    }
+
+    if (window.location.hostname === 'stream-service.proxer.me') {
+        return 'BLUE';
+    }
+
+    return 'UNKNOWN';
 }
 
 /** Logs key iframe context fields that help diagnose provider-specific init and parsing issues. */
@@ -280,6 +318,40 @@ function iGetSeriesSkipframesStorageKey(seriesId: string): string {
 /** Provides a shared async delay helper for spacing multi-frame hash captures. */
 function iSleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Picks the best fullscreen target available for the current player DOM. */
+function iGetFullscreenTarget(video: HTMLVideoElement): Element {
+    const plyrContainer = video.closest('.plyr');
+    if (plyrContainer) {
+        return plyrContainer;
+    }
+
+    return video.parentElement || video;
+}
+
+/** Returns the Plyr fullscreen button when available in the current player controls. */
+function iGetPlyrFullscreenButton(): HTMLButtonElement | null {
+    const candidate = document.querySelector('.plyr__control[data-plyr="fullscreen"]');
+    return candidate instanceof HTMLButtonElement ? candidate : null;
+}
+
+/** Returns whether the player is currently the active fullscreen element. */
+function iWasPlayerFullscreen(video: HTMLVideoElement): boolean {
+    const fullscreenTarget = iGetFullscreenTarget(video);
+    if (fullscreenTarget instanceof HTMLElement && fullscreenTarget.classList.contains('plyr--fullscreen')) {
+        return true;
+    }
+
+    const fullscreenElement = document.fullscreenElement;
+    if (!(fullscreenElement instanceof Element)) {
+        return false;
+    }
+
+    return fullscreenElement === fullscreenTarget
+        || fullscreenElement === video
+        || fullscreenElement.contains(video)
+        || fullscreenTarget.contains(fullscreenElement);
 }
 
 /** Reuses a hidden canvas used as the single frame-processing surface for hashing. */
@@ -468,24 +540,33 @@ async function iGetGlobalSkipframeSettings() {
     const autoNextEpisode = typeof raw.autoNextEpisode === 'boolean'
         ? raw.autoNextEpisode
         : true;
+    const autoStartFullscreenAfterAutoNext = typeof raw.autoStartFullscreenAfterAutoNext === 'boolean'
+        ? raw.autoStartFullscreenAfterAutoNext
+        : false;
 
     return {
         threshold,
         skipDuration,
         refreshMs,
         soundFade,
-        autoNextEpisode
+        autoNextEpisode,
+        autoStartFullscreenAfterAutoNext
     };
 }
 
 /** Publishes a short-lived completion signal consumed by host content script for auto-next. */
-async function iPublishAutoNextSignal(episodeKey: string): Promise<void> {
+async function iPublishAutoNextSignal(episodeKey: string, autoStart: boolean, restoreFullscreen: boolean): Promise<void> {
+    const now = Date.now();
+    const signal: IframeAutoNextSignal = {
+        episodeKey,
+        createdAt: now,
+        expiresAt: now + I_AUTO_NEXT_SIGNAL_TTL_MS,
+        autoStart,
+        restoreFullscreen
+    };
+
     await chrome.storage.local.set({
-        [I_AUTO_NEXT_SIGNAL_KEY]: {
-            episodeKey,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + I_AUTO_NEXT_SIGNAL_TTL_MS
-        }
+        [I_AUTO_NEXT_SIGNAL_KEY]: signal
     });
 }
 
@@ -500,13 +581,106 @@ function iSetupEpisodeCompletionSignal(video: HTMLVideoElement, episodeKey: stri
         completionSignaled = true;
         const settings = await iGetGlobalSkipframeSettings();
         if (!settings.autoNextEpisode) {
-            console.debug('[Proxer Skip] [IFRAME] Auto-next episode disabled; skipping completion flag');
+            console.log('[Proxer Skip] [IFRAME] Auto-next episode disabled; skipping completion flag');
             return;
         }
 
-        console.debug('[Proxer Skip] [IFRAME] Episode ended; publishing auto-next signal');
-        await iPublishAutoNextSignal(episodeKey);
+        const restoreFullscreen = settings.autoStartFullscreenAfterAutoNext === true && iWasPlayerFullscreen(video);
+
+        console.log('[Proxer Skip] [IFRAME] Episode ended; publishing auto-next signal');
+        await iPublishAutoNextSignal(
+            episodeKey,
+            settings.autoStartFullscreenAfterAutoNext === true,
+            restoreFullscreen
+        );
     });
+}
+
+/** Loads and validates the one-shot auto-start marker for the current episode. */
+async function iGetPendingPlayerLaunch(episodeKey: string): Promise<IframePendingPlayerLaunch | null> {
+    const data = await chrome.storage.local.get([I_PENDING_PLAYER_LAUNCH_KEY]);
+    const pending = (data[I_PENDING_PLAYER_LAUNCH_KEY] || {}) as IframePendingPlayerLaunch;
+    if (pending.episodeKey !== episodeKey) {
+        return null;
+    }
+
+    if (!Number.isFinite(pending.createdAt) || !Number.isFinite(pending.expiresAt)) {
+        await chrome.storage.local.remove(I_PENDING_PLAYER_LAUNCH_KEY);
+        return null;
+    }
+
+    const now = Date.now();
+    if (now > Number(pending.expiresAt) || now - Number(pending.createdAt) > I_PENDING_PLAYER_LAUNCH_TTL_MS) {
+        await chrome.storage.local.remove(I_PENDING_PLAYER_LAUNCH_KEY);
+        return null;
+    }
+
+    return pending;
+}
+
+/** Attempts fullscreen on the current player without affecting the rest of the iframe logic. */
+async function iTryEnterFullscreen(video: HTMLVideoElement): Promise<void> {
+    if (iWasPlayerFullscreen(video)) {
+        return;
+    }
+
+    // In extension content scripts we can't reliably call the page's Plyr instance,
+    // so we trigger Plyr's own fullscreen control button when it exists.
+    const plyrFullscreenButton = iGetPlyrFullscreenButton();
+    if (plyrFullscreenButton && !plyrFullscreenButton.disabled) {
+        plyrFullscreenButton.click();
+        await iSleep(80);
+        if (iWasPlayerFullscreen(video)) {
+            console.log('[Proxer Skip] [IFRAME] Entered fullscreen via Plyr control');
+            return;
+        }
+    }
+
+    const fullscreenTarget = iGetFullscreenTarget(video) as Element & {
+        requestFullscreen?: () => Promise<void>;
+    };
+    if (typeof fullscreenTarget.requestFullscreen !== 'function') {
+        console.log('[Proxer Skip] [IFRAME] Fullscreen API unavailable on player target');
+        return;
+    }
+
+    try {
+        await fullscreenTarget.requestFullscreen();
+        console.log('[Proxer Skip] [IFRAME] Entered fullscreen after auto-next');
+    } catch (error) {
+        console.log('[Proxer Skip] [IFRAME] Fullscreen request failed after auto-next:', error);
+    }
+}
+
+/** Runs the one-shot auto-start/fullscreen flow after an auto-next navigation. */
+async function iMaybeAutoStartAfterAutoNext(video: HTMLVideoElement, episodeKey: string): Promise<void> {
+    if (iGetPlayerType() === 'BLUE') {
+        console.log('[Proxer Skip] [IFRAME] Blue player detected; delaying pending launch check');
+        await iSleep(I_BLUE_PLAYER_LAUNCH_DELAY_MS);
+    }
+
+    const pending = await iGetPendingPlayerLaunch(episodeKey);
+    if (!pending) {
+        console.log('[Proxer Skip] [IFRAME] No pending player launch marker for episode', episodeKey);
+        return;
+    }
+
+    await chrome.storage.local.remove(I_PENDING_PLAYER_LAUNCH_KEY);
+
+    try {
+        await video.play();
+        console.log('[Proxer Skip] [IFRAME] Auto-started player after auto-next');
+    } catch (error) {
+        console.log('[Proxer Skip] [IFRAME] Auto-start play() failed after auto-next:', error);
+        return;
+    }
+
+    if (pending.shouldEnterFullscreen === true) {
+        await iTryEnterFullscreen(video);
+        return;
+    }
+
+    console.log('[Proxer Skip] [IFRAME] Skipping fullscreen restore because previous episode was not fullscreen');
 }
 
 /** Shows a short-lived toast at the old top-right Set Skip Time button position. */
@@ -734,13 +908,14 @@ function iStartFrameHashMatching(video: HTMLVideoElement, seriesId: string): voi
     const episodeData = episodes[episodeKey];
     console.debug('[Proxer Skip] [IFRAME] Episode data available:', Boolean(episodeData));
 
-    if (window.location.hostname === 'stream.proxer.me') {
+    if (iGetPlayerType() === 'RED') {
         const blueStreamId = iGetBlueStreamIdFromUrlParam();
         console.debug('[Proxer Skip] [IFRAME] Blue stream ID from URL parameter:', blueStreamId);
     }
 
     iSetupVideoBufferingListeners(video);
     iSetupEpisodeCompletionSignal(video, episodeKey);
+    await iMaybeAutoStartAfterAutoNext(video, episodeKey);
     iInjectFrameHashButton(video, seriesId);
     iStartFrameHashMatching(video, seriesId);
 })();

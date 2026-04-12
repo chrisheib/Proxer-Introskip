@@ -18,7 +18,7 @@ tbd
 
 ### Firefox
 
-tbd
+[Download Firefox Extension](https://extensions.stschiff.de/firefox/proxer-skip/proxer-anime-skip-latest.xpi)
 
 ## Features
 
@@ -28,6 +28,10 @@ Fügt eine globale Einstellung hinzu, um nach dem Skippen einen Audio-Fade einzu
 ### 2026-04-08 - Auto-next episode on completion
 Fügt eine globale Einstellung hinzu (standardmäßig aktiv), die beim Episodenende automatisch zur nächsten Episode wechselt.
 Die Iframe-Player signalisieren das Ende per Query-Parameter, den das Host-Skript auswertet.
+
+### 2026-04-12 - Auto-start and fullscreen after auto-continue
+Fügt eine standardmäßig deaktivierte Einstellung hinzu, die nach Auto-Continue den nächsten Player automatisch startet.
+Bei Bedarf wartet der blaue Player kurz auf den Wechsel zum roten Player und versucht danach Vollbild im Best-Effort-Modus.
 
 ## Entwicklung
 
